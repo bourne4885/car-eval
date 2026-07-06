@@ -1,6 +1,12 @@
 import streamlit as st
 
 # =======================================================
+# [무조건 최상단 필수 설정] 앱 전체 기본 설정 (딱 한 번만 호출)
+# =======================================================
+st.set_page_config(page_title="중고차 진단평가 시스템", page_icon="🚘", layout="wide")
+
+
+# =======================================================
 # [보안 설정] 나만 쓸 수 있는 비밀번호
 # =======================================================
 PRIVATE_PASSWORD = "car77"  # 기본 비밀번호는 car77 입니다.
@@ -10,7 +16,6 @@ if "authenticated" not in st.session_state:
 
 # 로그인 안 된 경우 화면 차단
 if not st.session_state.authenticated:
-    st.set_page_config(page_title="로그인 필요", page_icon="🔒", layout="centered")
     st.title("🔒 중고차 진단평가 시스템")
     st.subheader("인증된 사용자만 접속 가능합니다.")
     
@@ -23,11 +28,10 @@ if not st.session_state.authenticated:
             st.error("❌ 비밀번호가 틀렸습니다.")
     st.stop()
 
+
 # =======================================================
 # [로그인 성공 시] 멀티 페이지를 위한 기본 안내 메시지
 # =======================================================
-st.set_page_config(page_title="중고차 진단평가 시스템", page_icon="🚘", layout="wide")
-
 st.title("🚘 중고차 진단평가 시스템 홈")
 st.info("👈 왼쪽 사이드바 메뉴에서 원하시는 평가기 페이지를 선택해 주세요!")
 
