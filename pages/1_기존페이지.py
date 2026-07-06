@@ -1,7 +1,5 @@
 import streamlit as st
 
-st.set_page_config(page_title="중고차 진단평가 산정기", page_icon="🚘", layout="wide")
-
 st.title("🚘 중고차 진단평가 가격 산정기 (기존)")
 st.caption("성능점검지 기준 기반 가치 평가 매입/판매 산출 시스템")
 st.markdown("---")
