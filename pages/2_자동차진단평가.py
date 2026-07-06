@@ -50,7 +50,6 @@ class CarEvaluation:
             
         return math.ceil(mileage_score)
 
-st.set_page_config(page_title="법정 자동차 진단평가", page_icon="🚗", layout="wide")
 
 st.title("🚗 자동차 진단평가 기준 시스템")
 st.caption("기준서의 연산 규칙(올림 처리 및 주행거리 가·감점 한도)이 반영된 정밀 계산기입니다.")
