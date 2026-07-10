@@ -14,7 +14,7 @@ class CarEvaluator:
         self.base_price_manwon = base_price_manwon
         
         self.current_year = 2026
-        self.current_month = 6
+        self.current_month = 7  # 2026년 현재 기준 달 반영
 
     def get_tier_and_coefficient(self):
         """[제7조] 승용형 자동차 등급 및 등급계수 산출"""
@@ -48,21 +48,21 @@ class CarEvaluator:
 # ==========================================
 # 2. Streamlit 웹 UI 화면 구성 (프런트엔드)
 # ==========================================
-st.set_page_config(page_title="자동차진단평가 시스템", page_icon="🚗", layout="wide")
+st.set_page_config(page_title="자동차진단평가 가치산출 시스템", page_icon="🚗", layout="wide")
 
 st.title("🚗 자동차진단평가 가치산출 시스템 (2026 검정용)")
-st.caption("Streamlit Web Cloud Version")
+st.caption("기준서 제25p 사고이력 랭크 완벽 반영 버전")
 
-# 랭크별 기본 감점 점수 (기준서 제22조 반영)
+# 랭크별 기본 감점 점수 기준 정의
 rank_base_points = {
-    "외판1랭크": 15,
-    "외판2랭크": 30,
-    "주요골격A": 50,
-    "주요골격B": 80,
-    "주요골격C": 120
+    "1랭크": 15,
+    "2랭크": 30,
+    "A랭크": 50,
+    "B랭크": 80,
+    "C랭크": 120
 }
 
-# 폼 구성: 차량 기본 데이터 입력
+# 1. 차량 기본 정보 입력 섹션
 st.header("📝 1. 차량 기본 데이터 입력")
 col1, col2, col3 = st.columns(3)
 
@@ -79,95 +79,107 @@ with col3:
 
 st.markdown("---")
 
-# 폼 구성: 웹형 상태 표시도 입력란
-st.header("🚘 2. 사고수리 및 수리필요 부위 선택")
-st.info("💡 각 부위별로 발생한 사고 이력이나 수리 필요 상태를 선택해 주세요.")
+# 2. 사고수리 및 수리필요 평가 섹션 (기준서 표 완벽 매칭)
+st.header("🚘 2. 사고수리 및 수리필요 부위 선택 (제25p 랭크 분류)")
+st.info("💡 진단평가 기준서 표의 랭크 분류에 따른 19개 전체 항목입니다. 각 부위별 상태를 지정해 주세요.")
 
-# 평가 대상 부위 리스트 정의 (기준서 제25p 참고)
-car_parts = {
-    "후드": "외판1랭크",
-    "프론트 펜더": "외판1랭크",
-    "앞도어": "외판1랭크",
-    "트렁크 리드": "외판1랭크",
-    "쿼터 패널(리어펜더)": "외판2랭크",
-    "사이드 멤버": "주요골격B",
-    "휠 하우스": "주요골격B"
+# 기준서 제25p 랭크별 부위 정의 데이터 구조
+categorized_parts = {
+    "🔻 외판 1랭크 부위": {
+        "후드": "1랭크", "프론트 펜더": "1랭크", "도어": "1랭크", 
+        "트렁크 리드": "1랭크", "라디에이터 서포트(볼트체결)": "1랭크"
+    },
+    "🔻 외판 2랭크 부위": {
+        "쿼터 패널(리어펜더)": "2랭크", "루프 패널": "2랭크", "사이드 실 패널": "2랭크"
+    },
+    "🔺 주요골격 A랭크 부위": {
+        "프론트 패널": "A랭크", "크로스 멤버(용접부품)": "A랭크", "인사이드 패널": "A랭크", 
+        "트렁크 플로어 패널": "A랭크", "리어 패널": "A랭크"
+    },
+    "🔺 주요골격 B랭크 부위": {
+        "사이드 멤버": "B랭크", "휠 하우스": "B랭크", "필러 패널": "B랭크", "패키지 트레이": "B랭크"
+    },
+    "🔺 주요골격 C랭크 부위": {
+        "대쉬 패널": "C랭크", "플로어 패널": "C랭크"
+    }
 }
 
 selected_damage = {}
 
-# 웹 화면에 부위별 선택 라디오 버튼들을 깔끔하게 배치
-part_cols = st.columns(len(car_parts))
-for idx, (part_name, rank) in enumerate(car_parts.items()):
-    with part_cols[idx]:
-        st.subheader(part_name)
-        st.caption(f"({rank})")
-        status = st.radio(
-            f"{part_name} 상태",
-            ["정상", "교환(X)", "판금/용접(W)", "도장필요(P)"],
-            key=f"status_{part_name}",
-            label_visibility="collapsed"
-        )
-        if status != "정상":
-            selected_damage[part_name] = {"rank": rank, "status": status}
+# 랭크별 탭/섹션을 나누어 깔끔하게 화면 배치
+for section_title, parts in categorized_parts.items():
+    st.markdown(f"### {section_title}")
+    part_cols = st.columns(len(parts))
+    
+    for idx, (part_name, rank) in enumerate(parts.items()):
+        with part_cols[idx]:
+            # 부위별 토글/선택 상자 구성
+            status = st.selectbox(
+                part_name,
+                ["정상", "교환(X)", "판금/용접(W)", "도장필요(P)"],
+                key=f"status_{part_name}"
+            )
+            if status != "정상":
+                selected_damage[part_name] = {"rank": rank, "status": status}
+    st.markdown(" ")
 
 st.markdown("---")
 
-# 3. 계산하기 버튼 및 결과 도출
+# 3. 계산 및 결과 출력
 if st.button("💰 최종 진단평가가격 산출하기", type="primary", use_container_width=True):
     is_imp = True if origin == "수입" else False
     
-    # 계산 엔진 가동
+    # 계산 백엔드 엔진 가동
     engine = CarEvaluator(is_import=is_imp, displacement=displacement, reg_year=reg_year, reg_month=1, mileage=mileage, base_price_manwon=base_price)
     tier, tier_coef = engine.get_tier_and_coefficient()
     u_year, u_month, age_coef = engine.get_usage_period_and_coefficient()
 
-    # 모색도 기반 감점 정산
     total_penalty_points = 0
-    st.subheader("📋 선택된 실시간 이력 감점 내역")
+    st.subheader("📋 실시간 진단점수 산정 내역")
     
+    # 모색도/체크박스 기반 감점 계산
     if not selected_damage:
-        st.success("• 선택된 사고/수리 이력이 없습니다. (무사고 차량)")
+        st.success("• 감점 이력이 없습니다. (완전 무사고 차량)")
     else:
         for part, data in selected_damage.items():
             rank = data["rank"]
             status = data["status"]
             base_pt = rank_base_points.get(rank, 0)
             
-            # 수리 형태에 따른 기준서 보정식 적용
+            # 수리 형태에 따른 감가 보정식 규칙 적용
             if status == "판금/용접(W)":
-                base_pt = math.ceil(base_pt * 0.5)
+                base_pt = math.ceil(base_pt * 0.5)  # 판금/용접은 50%만 감점
             elif status == "도장필요(P)":
-                base_pt = 5 # 수리필요 항목 임시 배점
+                base_pt = 5                         # 수리필요(도장) 일괄 5점 적용
                 
             total_penalty_points += base_pt
             st.warning(f"• **{part}** ({rank}) ──> 상태: [{status}] / **-{base_pt}점** 감점")
 
-    # 주행거리 표준치 비교 연산
+    # 주행거리 감점 연동
     std_mileage = int(u_month * 1.66 * 1000)
     mile_diff = std_mileage - mileage
     mile_points = int(mile_diff / 1000)
     
     if mile_points < 0:
         total_penalty_points += abs(mile_points)
-        st.error(f"• **주행거리 과다**: 표준 대비 초과로 인해 **-{abs(mile_points)}점** 추가 감점")
+        st.error(f"• **주행거리 초과**: 표준 대비 과다 주행으로 인해 **-{abs(mile_points)}점** 추가 감점")
 
-    # 최종 가치 정산
+    # 최종 금액 산출 (1점 = 1만원)
     penalty_amount = total_penalty_points
     final_price = base_price - penalty_amount
     if final_price < 0: final_price = 0
 
-    # 결과 리포트 대시보드 출력
+    # 결과 대시보드 리포트
     st.markdown("---")
     st.header("🎯 최종 진단평가 판정 레포트")
     
     res_col1, res_col2 = st.columns(2)
     with res_col1:
-        st.metric(label="차량 등급 및 계수", value=f"{tier} 등급", delta=f"계수: {tier_coef}")
-        st.metric(label="사용 연수 및 계수", value=f"{u_year}년차", delta=f"계수: {age_coef}")
-        st.text(f"표준 주행거리: {std_mileage:,} km")
-        st.text(f"실제 주행거리: {mileage:,} km")
+        st.metric(label="차량 종합 등급", value=f"{tier} 등급", delta=f"등급계수: {tier_coef}")
+        st.metric(label="사용 연수 결과", value=f"{u_year}년차 적용", delta=f"사용년 계수: {age_coef}")
+        st.text(f"📊 표준 기준 주행거리: {std_mileage:,} km")
+        st.text(f"📊 차량 실제 주행거리: {mileage:,} km")
 
     with res_col2:
-        st.metric(label="종합 감점 금액", value=f"-{penalty_amount:,} 만원")
-        st.headline = st.metric(label="🏁 최종 진단평가 가격", value=f"{final_price:,} 만원")
+        st.metric(label="종합 감점 금액 합계", value=f"-{penalty_amount:,} 만원")
+        st.metric(label="🏁 최종 산출 진단평가 가격", value=f"{final_price:,} 만원")
