@@ -14,7 +14,7 @@ class CarEvaluator:
         self.base_price_manwon = base_price_manwon
         
         self.current_year = 2026
-        self.current_month = 7  # 2026년 현재 기준 달 반영
+        self.current_month = 7
 
     def get_tier_and_coefficient(self):
         """[제7조] 승용형 자동차 등급 및 등급계수 산출"""
@@ -51,7 +51,7 @@ class CarEvaluator:
 st.set_page_config(page_title="자동차진단평가 가치산출 시스템", page_icon="🚗", layout="wide")
 
 st.title("🚗 자동차진단평가 가치산출 시스템 (2026 검정용)")
-st.caption("기준서 제25p 사고이력 랭크 완벽 반영 버전")
+st.caption("운전석(좌) / 조수석(우) 위치 구분 완벽 세분화 버전")
 
 # 랭크별 기본 감점 점수 기준 정의
 rank_base_points = {
@@ -79,25 +79,34 @@ with col3:
 
 st.markdown("---")
 
-# 2. 사고수리 및 수리필요 평가 섹션 (기준서 표 완벽 매칭)
-st.header("🚘 2. 사고수리 및 수리필요 부위 선택 (제25p 랭크 분류)")
-st.info("💡 진단평가 기준서 표의 랭크 분류에 따른 19개 전체 항목입니다. 각 부위별 상태를 지정해 주세요.")
+# 2. 사고수리 및 수리필요 평가 섹션 (운전석/조수석 세분화)
+st.header("🚘 2. 사고수리 및 수리필요 부위 선택 (좌우 독립 분류)")
+st.info("💡 랭크 분류표를 기반으로 운전석 측(좌)과 조수석 측(우)을 분리하여 정밀 진단이 가능하도록 확장했습니다.")
 
-# 기준서 제25p 랭크별 부위 정의 데이터 구조
+# 좌우 구분을 반영한 데이터 세팅
 categorized_parts = {
     "🔻 외판 1랭크 부위": {
-        "후드": "1랭크", "프론트 펜더": "1랭크", "도어": "1랭크", 
+        "후드": "1랭크", 
+        "프론트 펜더(운전석/좌)": "1랭크", "프론트 펜더(조수석/우)": "1랭크",
+        "앞도어(운전석/좌)": "1랭크", "앞도어(조수석/우)": "1랭크",
+        "뒷도어(운전석/좌)": "1랭크", "뒷도어(조수석/우)": "1랭크",
         "트렁크 리드": "1랭크", "라디에이터 서포트(볼트체결)": "1랭크"
     },
     "🔻 외판 2랭크 부위": {
-        "쿼터 패널(리어펜더)": "2랭크", "루프 패널": "2랭크", "사이드 실 패널": "2랭크"
+        "쿼터 패널(운전석/좌)": "2랭크", "쿼터 패널(조수석/우)": "2랭크", 
+        "루프 패널": "2랭크", 
+        "사이드 실 패널(운전석/좌)": "2랭크", "사이드 실 패널(조수석/우)": "2랭크"
     },
     "🔺 주요골격 A랭크 부위": {
-        "프론트 패널": "A랭크", "크로스 멤버(용접부품)": "A랭크", "인사이드 패널": "A랭크", 
+        "프론트 패널": "A랭크", "크로스 멤버(용접부품)": "A랭크", 
+        "인사이드 패널(운전석/좌)": "A랭크", "인사이드 패널(조수석/우)": "A랭크", 
         "트렁크 플로어 패널": "A랭크", "리어 패널": "A랭크"
     },
     "🔺 주요골격 B랭크 부위": {
-        "사이드 멤버": "B랭크", "휠 하우스": "B랭크", "필러 패널": "B랭크", "패키지 트레이": "B랭크"
+        "사이드 멤버(운전석/좌)": "B랭크", "사이드 멤버(조수석/우)": "B랭크", 
+        "휠 하우스(운전석/좌)": "B랭크", "휠 하우스(조수석/우)": "B랭크", 
+        "필러 패널(운전석/좌)": "B랭크", "필러 패널(조수석/우)": "B랭크", 
+        "패키지 트레이": "B랭크"
     },
     "🔺 주요골격 C랭크 부위": {
         "대쉬 패널": "C랭크", "플로어 패널": "C랭크"
@@ -106,21 +115,25 @@ categorized_parts = {
 
 selected_damage = {}
 
-# 랭크별 탭/섹션을 나누어 깔끔하게 화면 배치
+# 화면 레이아웃 스크롤 분산을 위해 각 섹션별 레이아웃 폼 구축
 for section_title, parts in categorized_parts.items():
-    st.markdown(f"### {section_title}")
-    part_cols = st.columns(len(parts))
+    st.markdown(f"#### {section_title}")
     
-    for idx, (part_name, rank) in enumerate(parts.items()):
-        with part_cols[idx]:
-            # 부위별 토글/선택 상자 구성
-            status = st.selectbox(
-                part_name,
-                ["정상", "교환(X)", "판금/용접(W)", "도장필요(P)"],
-                key=f"status_{part_name}"
-            )
-            if status != "정상":
-                selected_damage[part_name] = {"rank": rank, "status": status}
+    # 항목이 많으므로 한 줄에 최대 4개씩 분할 배치
+    part_items = list(parts.items())
+    chunk_size = 4
+    for i in range(0, len(part_items), chunk_size):
+        chunk = part_items[i:i+chunk_size]
+        cols = st.columns(4)
+        for idx, (part_name, rank) in enumerate(chunk):
+            with cols[idx]:
+                status = st.selectbox(
+                    part_name,
+                    ["정상", "교환(X)", "판금/용접(W)", "도장필요(P)"],
+                    key=f"status_{part_name}"
+                )
+                if status != "정상":
+                    selected_damage[part_name] = {"rank": rank, "status": status}
     st.markdown(" ")
 
 st.markdown("---")
@@ -137,7 +150,7 @@ if st.button("💰 최종 진단평가가격 산출하기", type="primary", use_
     total_penalty_points = 0
     st.subheader("📋 실시간 진단점수 산정 내역")
     
-    # 모색도/체크박스 기반 감점 계산
+    # 입력된 대시보드 상태값 기반 감점 정산
     if not selected_damage:
         st.success("• 감점 이력이 없습니다. (완전 무사고 차량)")
     else:
@@ -146,16 +159,15 @@ if st.button("💰 최종 진단평가가격 산출하기", type="primary", use_
             status = data["status"]
             base_pt = rank_base_points.get(rank, 0)
             
-            # 수리 형태에 따른 감가 보정식 규칙 적용
             if status == "판금/용접(W)":
-                base_pt = math.ceil(base_pt * 0.5)  # 판금/용접은 50%만 감점
+                base_pt = math.ceil(base_pt * 0.5)
             elif status == "도장필요(P)":
-                base_pt = 5                         # 수리필요(도장) 일괄 5점 적용
+                base_pt = 5
                 
             total_penalty_points += base_pt
             st.warning(f"• **{part}** ({rank}) ──> 상태: [{status}] / **-{base_pt}점** 감점")
 
-    # 주행거리 감점 연동
+    # 주행거리 과다 감점 연동
     std_mileage = int(u_month * 1.66 * 1000)
     mile_diff = std_mileage - mileage
     mile_points = int(mile_diff / 1000)
@@ -164,12 +176,12 @@ if st.button("💰 최종 진단평가가격 산출하기", type="primary", use_
         total_penalty_points += abs(mile_points)
         st.error(f"• **주행거리 초과**: 표준 대비 과다 주행으로 인해 **-{abs(mile_points)}점** 추가 감점")
 
-    # 최종 금액 산출 (1점 = 1만원)
+    # 최종 금액 산출
     penalty_amount = total_penalty_points
     final_price = base_price - penalty_amount
     if final_price < 0: final_price = 0
 
-    # 결과 대시보드 리포트
+    # 결과 리포트 대시보드 출력
     st.markdown("---")
     st.header("🎯 최종 진단평가 판정 레포트")
     
