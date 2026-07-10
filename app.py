@@ -1,104 +1,221 @@
 import streamlit as st
+import math
 
-st.set_page_config(page_title="중고차 경매 입찰가 산출 시스템", page_icon="📈", layout="wide")
+# ==========================================
+# 1. 통합 가격 산출 엔진 (기준서 제22조 + 경매 역산)
+# ==========================================
+class AuctionEvaluator:
+    def __init__(self, is_import: bool, displacement: int, reg_year: int, reg_month: int, mileage: int, base_price_manwon: int):
+        self.is_import = is_import
+        self.displacement = displacement
+        self.reg_year = reg_year
+        self.reg_month = reg_month
+        self.mileage = mileage
+        self.base_price_manwon = base_price_manwon
+        
+        self.current_year = 2026
+        self.current_month = 7
 
-st.title("📈 실전 중고차 경매 최적 입찰가 산출기")
-st.caption("자격증 시험용 공식이 아닌, 실제 소매 시세와 시장 감가를 반영한 매입용 계산기입니다.")
+    def get_tier_and_coefficient(self):
+        """[제7조] 승용형 자동차 등급 및 등급계수 산출"""
+        if self.displacement >= 3600: tier = "특C"
+        elif self.displacement >= 2900: tier = "특B"
+        elif self.displacement >= 2400: tier = "특A"
+        elif self.displacement >= 2100: tier = "I"
+        elif self.displacement >= 1700: tier = "II"
+        elif self.displacement >= 1300: tier = "III"
+        elif self.displacement >= 1100: tier = "IV"
+        else: tier = "경"
 
-# 1. 목표 차량 시장 데이터 입력
-st.header("📝 1. 목표 차량 시장 시세 및 목표 설정")
+        coefficients = {
+            "국산": {"특C": 2.2, "특B": 1.8, "특A": 1.5, "I": 1.4, "II": 1.2, "III": 1.0, "IV": 0.9, "경": 0.8},
+            "수입": {"특C": 2.7, "특B": 2.5, "특A": 2.0, "I": 1.7, "II": 1.4, "III": 1.2, "IV": 1.1, "경": 1.0}
+        }
+        return tier, coefficients["수입" if self.is_import else "국산"][tier]
+
+    def get_usage_period_and_coefficient(self):
+        """[제8조] 사용년 계수 산출"""
+        usage_years = self.current_year - self.reg_year
+        remaining_months = self.current_month - self.reg_month
+        usage_months = (usage_years * 12) + remaining_months
+        
+        if not self.is_import:
+            age_coef = 1.0 if usage_years <= 2 else (0.9 if usage_years == 3 else (0.8 if usage_years == 4 else 0.7))
+        else:
+            age_coef = 1.0 if usage_years <= 2 else (0.9 if usage_years in [3, 4] else (0.8 if usage_years in [5, 6] else 0.7))
+        return usage_years, usage_months, age_coef
+
+    def calculate_accident_penalty(self, selected_damage, base_points_dict, rank_coef_dict):
+        """[제22조] 사고수리이력 루트(√) 공식 기반 감가액 연산"""
+        if not selected_damage:
+            return 0, 0, {}
+
+        total_gamma_coef = 0.0
+        max_rank_coef = 0.0
+        detail_logs = {}
+
+        for part, data in selected_damage.items():
+            rank = data["rank"]
+            status = data["status"]
+            
+            # 기준서 기반 기본 계수 수치 변환
+            base_coef = base_points_dict.get(rank, 0) / 100.0 
+            
+            if status == "교환(X)":
+                repair_coef = 1.0
+            elif status == "판금/용접(W)":
+                repair_coef = 0.5
+            else:
+                repair_coef = 0.0
+                
+            current_part_gamma = base_coef * repair_coef
+            total_gamma_coef += current_part_gamma
+            
+            r_coef = rank_coef_dict.get(rank, 1.0)
+            if r_coef > max_rank_coef:
+                max_rank_coef = r_coef
+                
+            if current_part_gamma > 0:
+                detail_logs[part] = f"개별계수: {current_part_gamma:.3f} (랭크적용계수: {r_coef})"
+
+        # 예외 규칙: 1랭크 딱 1곳 교환만 단독 존재할 때 50% 감면
+        if len(selected_damage) == 1:
+            only_part = list(selected_damage.values())[0]
+            if only_part["rank"] == "1랭크" and only_part["status"] == "교환(X)":
+                total_gamma_coef = total_gamma_coef * 0.5
+
+        if total_gamma_coef == 0:
+            return 0, 0, detail_logs
+
+        # 제22조 1항 공식 실행
+        inside_sqrt = self.base_price_manwon * total_gamma_coef
+        final_accident_penalty = (math.sqrt(inside_sqrt) / 4.8) * max_rank_coef
+        
+        return round(final_accident_penalty, 2), total_gamma_coef, detail_logs
+
+# ==========================================
+# 2. Streamlit 웹 UI 화면 구성
+# ==========================================
+st.set_page_config(page_title="기준서 기반 경매 입찰산출 시스템", page_icon="⚖️", layout="wide")
+
+st.title("⚖️ 기준서 연산 기반 중고차 경매 입찰가 산출기 (2026)")
+st.caption("KAIWA 진단평가 표준 감가 공식을 돌린 후, 경매장 수수료와 마진을 역산하여 마지노선을 산출합니다.")
+
+# 계수 테이블 선언
+base_points_table = {"1랭크": 15, "2랭크": 30, "A랭크": 50, "B랭크": 80, "C랭크": 120}
+rank_coef_table = {"1랭크": 1.0, "2랭크": 1.4, "A랭크": 1.6, "B랭크": 1.8, "C랭크": 2.0}
+
+# 섹션 1: 차량 조건 및 경매 목표 설정
+st.header("📝 1. 차량 기본 정보 및 입찰 목표 세팅")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    market_price = st.number_input("현재 시장 소매 시세 (만원)", min_value=0, value=3000, step=50, help="엔카/KB차차차 등에서 동일 연식/주행거리 무사고 차가 판매되는 평균 가격")
-    target_margin = st.number_input("내가 남기고 싶은 최소 마진 (만원)", min_value=0, value=150, step=10)
+    origin = st.selectbox("차량 구분", ["국산", "수입"])
+    displacement = st.number_input("배기량 (cc)", min_value=100, max_value=10000, value=3500, step=100)
+    base_price = st.number_input("무사고 소매 기준가격 (만원)", min_value=0, value=3000, step=50, help="경매장 시세의 뼈대가 될 정상 소매가")
 
 with col2:
-    auction_fee_rate = st.slider("경매장 수수료율 (%)", min_value=0.0, max_value=5.0, value=2.2, step=0.1)
-    merchant_fee = st.number_input("기타 부대비용 총합 (만원)", min_value=0, value=60, help="성능비, 탁송료, 상품화 작업비(광택/도색) 등")
+    reg_year = st.number_input("최초등록년도 (연도)", min_value=2000, max_value=2026, value=2023)
+    mileage = st.number_input("실제 주행거리 (km)", min_value=0, max_value=1000000, value=50000, step=1000)
 
 with col3:
-    is_premium_car = st.checkbox("수입차 또는 대형 대형 프리미엄 차종인가요?", value=False, help="체크 시 사고 부위별 마켓 감가액이 1.5배 상향 적용됩니다.")
+    target_margin = st.number_input("확보하고 싶은 경매 매입 마진 (만원)", min_value=0, value=150, step=10)
+    fixed_cost = st.number_input("기타 부대비용 및 상품화 비용 (만원)", min_value=0, value=60, help="탁송료, 성능 점검비, 광택 및 도색 비용 등")
+    auction_fee_rate = st.slider("경매장 낙찰 수수료율 (%)", min_value=0.0, max_value=5.0, value=2.2, step=0.1)
 
 st.markdown("---")
 
-# 2. 현실적인 시장 사고 감가 설정 (딜러 매입 감가 기준)
-st.header("🚘 2. 차량 사고 수리 및 상품화 필요 부위 선택")
-st.info("💡 실제 시장에서는 부위별로 차값에서 직접 정액 감가를 진행합니다.")
-
-# 시장 감가 리스트 (무사고 시세 대비 깎이는 대략적인 금액)
-market_depreciation_rules = {
-    "후드(본네트) 교환": 40,
-    "앞휀더 교환 (한쪽당)": 25,
-    "도어 교환 (한쪽당)": 35,
-    "트렁크 리드 교환": 40,
-    "쿼터패널(뒤휀더) 잘라 붙임": 80,
-    "루프 패널 교환": 150,
-    "사이드멤버(주요골격) 손상/교환": 250,
-    "휠하우스(주요골격) 손상/교환": 350,
-    "인사이드패널(골격 미세) 수리": 70,
-    "단순 도색/판금 필요 (판당 수리비 부수기)": 15
+# 섹션 2: 사고수리 및 수리필요 평가 (좌우 분리형 전체 부위)
+st.header("🚘 2. 진단 대상 차량 사고수리 상태 체크")
+categorized_parts = {
+    "🔻 외판 1랭크 부위": {
+        "후드": "1랭크", "프론트 펜더(운전석/좌)": "1랭크", "프론트 펜더(조수석/우)": "1랭크",
+        "앞도어(운전석/좌)": "1랭크", "앞도어(조수석/우)": "1랭크", "뒷도어(운전석/좌)": "1랭크", "뒷도어(조수석/우)": "1랭크",
+        "트렁크 리드": "1랭크", "라디에이터 서포트(볼트체결)": "1랭크"
+    },
+    "🔻 외판 2랭크 부위": {
+        "쿼터 패널(운전석/좌)": "2랭크", "쿼터 패널(조수석/우)": "2랭크", "루프 패널": "2랭크", 
+        "사이드 실 패널(운전석/좌)": "2랭크", "사이드 실 패널(조수석/우)": "2랭크"
+    },
+    "🔺 주요골격 A랭크 부위": {
+        "프론트 패널": "A랭크", "크로스 멤버(용접부품)": "A랭크", "인사이드 패널(운전석/좌)": "A랭크", "인사이드 패널(조수석/우)": "A랭크", "트렁크 플로어 패널": "A랭크", "리어 패널": "A랭크"
+    },
+    "🔺 주요골격 B랭크 부위": {
+        "사이드 멤버(운전석/좌)": "B랭크", "사이드 멤버(조수석/우)": "B랭크", "휠 하우스(운전석/좌)": "B랭크", "휠 하우스(조수석/우)": "B랭크", "필러 패널(운전석/좌)": "B랭크", "필러 패널(조수석/우)": "B랭크", "패키지 트레이": "B랭크"
+    },
+    "🔺 주요골격 C랭크 부위": {
+        "대쉬 패널": "C랭크", "플로어 패널": "C랭크"
+    }
 }
 
-selected_damages = []
-st.markdown("#### 🔍 감가 요인 체크리스트")
-
-# 2열로 나누어 체크박스 배치
-dmg_items = list(market_depreciation_rules.items())
-col_d1, col_d2 = st.columns(2)
-
-for idx, (label, cost) in enumerate(dmg_items):
-    # 프리미엄/수입차 가중치 적용
-    actual_cost = round(cost * 1.5) if is_premium_car else cost
-    
-    if idx % 2 == 0:
-        with col_d1:
-            if st.checkbox(f"{label} (-{actual_cost}만원)", key=f"dmg_{idx}"):
-                selected_damages.append(actual_cost)
-    else:
-        with col_d2:
-            if st.checkbox(f"{label} (-{actual_cost}만원)", key=f"dmg_{idx}"):
-                selected_damages.append(actual_cost)
+selected_damage = {}
+for section_title, parts in categorized_parts.items():
+    st.markdown(f"#### {section_title}")
+    part_items = list(parts.items())
+    for i in range(0, len(part_items), 4):
+        chunk = part_items[i:i+4]
+        cols = st.columns(4)
+        for idx, (part_name, rank) in enumerate(chunk):
+            with cols[idx]:
+                status = st.selectbox(part_name, ["정상", "교환(X)", "판금/용접(W)", "도장필요(P)"], key=f"status_{part_name}")
+                if status != "정상":
+                    selected_damage[part_name] = {"rank": rank, "status": status}
 
 st.markdown("---")
 
-# 3. 입찰가 산출 로직
-if st.button("📊 경매 최고 입찰 마지노선 산출하기", type="primary", use_container_width=True):
+# 섹션 3: 최종 연산 프로세스
+if st.button("📊 기준서 연산 반영 경매 입찰가 최종 도출", type="primary", use_container_width=True):
+    is_imp = True if origin == "수입" else False
     
-    # 총 사고 감가액
-    total_market_damage = sum(selected_damages)
-    
-    # 사고 감가가 반영된 이 차량의 '실제 매입 가치'
-    damaged_car_value = market_price - total_market_damage
-    
-    # 경매장 수수료 계산 (낙찰가 기준 2.2% 역산 가제작)
-    # 실제 낙찰가를 X라 하면, X + X*수수료율 + 부대비용 + 마진 = 차량가치
-    # X * (1 + rate) = 차량가치 - 부대비용 - 마진
-    fee_factor = 1 + (auction_fee_rate / 100)
-    
-    max_bid_price = (damaged_car_value - merchant_fee - target_margin) / fee_factor
-    max_bid_price = round(max_bid_price)
-    
-    # 수수료 및 최종 지출 분석
-    final_fee = round(max_bid_price * (auction_fee_rate / 100))
-    total_invested = max_bid_price + final_fee + merchant_fee
-    expected_profit = market_price - total_market_damage - total_invested
+    engine = AuctionEvaluator(is_import=is_imp, displacement=displacement, reg_year=reg_year, reg_month=1, mileage=mileage, base_price_manwon=base_price)
+    tier, tier_coef = engine.get_tier_and_coefficient()
+    u_year, u_month, age_coef = engine.get_usage_period_and_coefficient()
 
-    # 결과 표출
-    st.header("🎯 경매 입찰 전략 레포트")
+    # 1. 기준서 제22조 사고 감가액 도출
+    accident_penalty, total_coef, logs = engine.calculate_accident_penalty(selected_damage, base_points_table, rank_coef_table)
     
-    res_c1, res_c2 = st.columns(2)
-    with res_c1:
-        st.metric(label="🏁 경매장 최대로 적어낼 입찰가 (Max Bid)", value=f"{max_bid_price:,} 만원")
-        st.caption(f"⚠️ 이 금액보다 비싸게 낙찰받으면 목표하신 {target_margin}만원 마진을 확보할 수 없습니다.")
-        
-    with res_c2:
-        st.metric(label="💰 예상 총 투자 비용 (차값+수수료+부대비용)", value=f"{total_invested:,} 만원")
-        st.text(f"• 차량 자체 감가액: -{total_market_damage} 만원")
-        st.text(f"• 경매장 예상 수수료: {final_fee} 만원")
+    # 2. 도장필요 건 및 주행거리 초과 건 정산 (현실 시장 감가 보정 결합을 위해 건당 15만원 처리)
+    paint_count = sum(1 for d in selected_damage.values() if d["status"] == "도장필요(P)")
+    paint_penalty = paint_count * 15  # 실전 도색비 판당 15만원 적용
+    
+    std_mileage = int(u_month * 1.66 * 1000)
+    mile_diff = std_mileage - mileage
+    mile_penalty = max(0, int(-mile_diff / 1000) * 2) # 표준 초과 km당 실전 페널티 단가 적용
+
+    # 3. 차량의 총 평가 가치 산출
+    total_reduction = accident_penalty + paint_penalty + mile_penalty
+    evaluated_car_value = max(0, base_price - total_reduction)
+
+    # 4. 경매장 수수료 역산하여 최대 입찰가(Max Bid) 도출
+    # Formula: (평가가치 - 부대비용 - 목표마진) / (1 + 수수료율)
+    fee_factor = 1 + (auction_fee_rate / 100)
+    max_bid_price = (evaluated_car_value - fixed_cost - target_margin) / fee_factor
+    max_bid_price = max(0, round(max_bid_price))
+    
+    # 수수료 지출 상세 정보
+    estimated_fee = round(max_bid_price * (auction_fee_rate / 100))
+
+    # 결과 대시보드 리포팅
+    st.header("🎯 실전 경매 입찰 전략 분석 보고서")
+    
+    if logs:
+        st.subheader("📋 기준서 제22조 사고이력 연산 로그")
+        for p_name, log_txt in logs.items():
+            st.text(f"  • {p_name} ──> {log_txt}")
+        st.info(f"💡 공식 대입 정보: 총 사고감가계수합 = {total_coef:.3f}")
+
+    res_col1, res_col2 = st.columns(2)
+    with res_col1:
+        st.metric(label="🏁 경매장 패들 최대 입찰 금액 (Max Bid)", value=f"{max_bid_price:,} 만원")
+        st.success(f"📈 목표 마진 {target_margin}만 원 확보 가능 금액")
+        st.text(f"📊 표준 기준 주행거리: {std_mileage:,} km (현재 {mileage:,} km)")
+
+    with res_col2:
+        st.metric(label="📉 차량 종합 감가액 총합", value=f"-{round(total_reduction):,} 만원")
+        st.text(f"  • 공식 사고 감가: {accident_penalty:,} 만원")
+        st.text(f"  • 실전 상품화(도색) 비용: {paint_penalty:,} 만원")
+        st.text(f"  • 주행거리 초과 페널티: {mile_penalty:,} 만원")
+        st.text(f"  • 경매장 예상 수수료: {estimated_fee:,} 만원")
 
     st.markdown("---")
-    if max_bid_price <= 0:
-        st.error("🚨 감가액과 부대비용이 너무 커서 입찰 불가능한 차량입니다. 다른 매물을 찾아보세요!")
-    else:
-        st.success(f"💡 결론: 경매장에서 **[{max_bid_price:,}만 원]** 이하로 낙찰받으면, 무사고 시세 {market_price}만 원짜리 차량을 감가 및 비용 정산 후에도 안전하게 가져오실 수 있습니다.")
+    st.warning(f"💡 **최종 가이드**: 시세 {base_price}만 원 기준, 기준서 사고 감가와 인건비/부대비용({fixed_cost}만 원)을 모두 털어낸 이 차량의 순수 가치는 **{evaluated_car_value:,}만 원**입니다. 따라서 경매장에서 **[{max_bid_price:,}만 원]**까지만 누르고 낙찰받으셔야 계획하신 수익을 내고 안전하게 사 오실 수 있습니다.")
