@@ -1,21 +1,25 @@
+import hashlib
 import streamlit as st
 
 # 🚨 Streamlit 설정은 무조건 코드 최상단에 딱 한 번만!
 st.set_page_config(page_title="실전 딜러형 경매 매입 시스템", page_icon="🚗", layout="wide")
 
 # ==========================================
-# 0. 단순 직관적인 비밀번호 검증 엔진
+# 0. 해시 암호화 보안 엔진 (텍스트 노출 차단)
 # ==========================================
+# 원본 암호의 해시값만 저장합니다. 소스코드가 노출되어도 비밀번호 유추가 불가능합니다.
+CORRECT_HASH = "6543b59df5c4a5c93a027376c9b4e5781a8b94fde185e493e88849764516ba7d"
+
 def check_password():
-    """글자 그대로 'car77'과 비교하는 심플한 로그인 함수"""
+    """암호화된 값으로 승인된 사용자 여부를 검증하는 함수"""
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
-    # 이미 로그인 성공했다면 바로 본문으로 통과
+    # 인증 성공 시 메인 프로그램으로 통과
     if st.session_state["authenticated"]:
         return True
 
-    # 로그인 화면 중앙 정렬 구획
+    # 로그인 화면 레이아웃 구획
     _, center_col, _ = st.columns([1, 2, 1])
     
     with center_col:
@@ -23,24 +27,20 @@ def check_password():
         st.title("🔒 시스템 보안 인증")
         st.caption("본 프로그램은 승인된 딜러 전용 시스템입니다. 접근 권한이 필요합니다.")
         
-        with st.form("login_form"):
-            # 입력창 (car77 입력 시 대소문자나 공백 실수를 방지하도록 셋팅)
-            password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
-            submit_button = st.form_submit_button("인증하기", type="primary", use_container_width=True)
+        # 💡 힌트 문구와 안내 텍스트를 완전히 제거했습니다.
+        password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
+        
+        if password_input:
+            pure_password = password_input.strip()
+            # 입력된 텍스트를 즉시 암호화하여 대조
+            input_hash = hashlib.sha256(pure_password.encode()).hexdigest()
             
-            if submit_button:
-                # 입력된 값 앞뒤 공백을 자르고 무조건 소문자로 변경
-                processed_input = password_input.strip().lower()
-                
-                # 💡 글자 그대로 'car77' 인지 직관적으로 검사합니다.
-                if processed_input == "car77":
-                    st.session_state["authenticated"] = True
-                    st.success("🔓 인증 성공! 잠시만 기다려주세요...")
-                    st.rerun()  # 화면 새로고침하여 본문 실행
-                else:
-                    st.error("❌ 비밀번호가 틀렸습니다.")
-                    if password_input:
-                        st.info(f"💡 현재 입력창에 쓰신 글자: '{password_input}'")
+            if input_hash == CORRECT_HASH:
+                st.session_state["authenticated"] = True
+                st.success("🔓 인증 성공! 시스템을 시작합니다.")
+                st.rerun()  # 화면을 새로고침하여 본문 실행
+            else:
+                st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
                     
     return False
 
@@ -245,4 +245,4 @@ if check_password():
             st.text(f"   • 현장 도색 필요 비용 ({paint_count}판): {paint_penalty:,} 만원")
 
         st.markdown("---")
-        st.error(f"⚠️ **딜러용 최종 브리핑**: 사고 및 연식 조율 후 차량의 리얼 가치는 **{evaluated_car_value:,}만 원**입니다. 상사 마진 {target_margin}만 원을 깨지 않으려면 경매 낙찰 수수료를 포함해 **[{max_bid_price:,}만 원]** 밑으로 무조건 잡으셔야 합니다.")
+        st.error(f"⚠️ **딜러용 최종 브리핑**: 사고 및 연식 조율 후 차량의 리얼 가치는 **{evaluated_car_value:,}만 원**입니다. 상사 마진 {target_margin}만 원을 깨지 않으려면 경매 낙찰 수수료을 포함해 **[{max_bid_price:,}만 원]** 밑으로 무조건 잡으셔야 합니다.")
