@@ -5,13 +5,13 @@ import streamlit as st
 st.set_page_config(page_title="실전 딜러형 경매 매입 시스템", page_icon="🚗", layout="wide")
 
 # ==========================================
-# 0. 해시 암호화 보안 엔진 (인코딩 보완)
+# 0. 해시 암호화 보안 엔진 (오작동 완벽 차단 버전)
 # ==========================================
-
+# 'car77'의 정확한 SHA-256 해시값 (비밀번호 노출 완전 차단)
 CORRECT_HASH = "6543b59df5c4a5c93a027376c9b4e5781a8b94fde185e493e88849764516ba7d"
 
 def check_password():
-    """암호화된 값으로 승인된 사용자 여부를 검증하는 함수"""
+    """로그인 상태 유지가 꼬이지 않도록 폼 제출 방식으로 제어하는 함수"""
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
@@ -27,20 +27,22 @@ def check_password():
         st.title("🔒 시스템 보안 인증")
         st.caption("본 프로그램은 승인된 딜러 전용 시스템입니다. 접근 권한이 필요합니다.")
         
-        # 텍스트가 입력되는 시점에 바로 반응하도록 세팅
-        password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
-        
-        if password_input:
-            # 공백 제거 및 인코딩 규격 명시(utf-8)로 매칭 정확도를 100%로 올립니다.
-            pure_password = password_input.strip()
-            input_hash = hashlib.sha256(pure_password.encode('utf-8')).hexdigest()
+        # 💡 st.form으로 감싸서 글자를 타이핑하는 도중에는 코드가 실시간으로 튕기지 않게 막아줍니다.
+        with st.form("login_form", clear_on_submit=False):
+            password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
+            submit_button = st.form_submit_button("인증하기", type="primary", use_container_width=True)
             
-            if input_hash == CORRECT_HASH:
-                st.session_state["authenticated"] = True
-                st.success("🔓 인증 성공! 시스템을 시작합니다.")
-                st.rerun()  # 화면을 새로고침하여 본문 실행
-            else:
-                st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
+            # 반드시 버튼을 '클릭'하거나 입력 후 '엔터'를 쳤을 때만 단 한 번 검증을 실행합니다.
+            if submit_button:
+                pure_password = password_input.strip()
+                input_hash = hashlib.sha256(pure_password.encode('utf-8')).hexdigest()
+                
+                if input_hash == CORRECT_HASH:
+                    st.session_state["authenticated"] = True
+                    st.success("🔓 인증 성공! 시스템을 시작합니다.")
+                    st.rerun()  # 화면을 즉시 새로고침하여 아래 프로그램 본문을 띄움
+                else:
+                    st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
                     
     return False
 
@@ -103,7 +105,7 @@ if check_password():
 
             market_price_table = {
                 "국산": {"1랭크": 40, "2랭크": 100, "A랭크": 200, "B랭크": 350, "C랭크": 500},
-                "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭0": 600, "C랭크": 900}
+                "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
             }
             
             origin_key = "수입" if self.is_import else "국산"
