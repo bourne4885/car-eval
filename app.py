@@ -35,7 +35,7 @@ class KautoStandardEvaluator:
         self.eval_year, self.eval_month = eval_year, eval_month
 
     def determine_grade(self):
-        if self.vehicle_type == "승용형" or self.vehicle_type == "다목적형":
+        if self.vehicle_type in ["승용형", "다목적형"]:
             cc = self.displacement
             if cc >= 3600: return "특C"
             elif cc >= 2900: return "특B"
@@ -74,14 +74,12 @@ class KautoStandardEvaluator:
         total_penalty = 0
         logs = []
         
-        # 사고/교환 계산
         for part, data in accident_data.items():
             base = active_table.get(data["rank"], 0)
             penalty = int(base * (1.0 if data["status"] == "교환(X)" else 0.6) * coeff)
             total_penalty += penalty
             logs.append({"부위": part, "분류": "사고/교환", "상태": data["status"], "감가액": penalty})
             
-        # 도색 계산
         for part in painting_data:
             total_penalty += paint_cost
             logs.append({"부위": part, "분류": "도색", "상태": "도색(P)", "감가액": paint_cost})
@@ -89,7 +87,7 @@ class KautoStandardEvaluator:
         return total_penalty, logs
 
 # ==========================================
-# 1. UI 설정
+# UI 및 로직
 # ==========================================
 st.set_page_config(page_title="차량 매입가 시스템", layout="wide")
 st.title("🚗 진단협회 표준 경매 매입 시스템")
@@ -104,14 +102,12 @@ with col1:
     st.subheader("📋 차량 정보")
     origin = st.selectbox("제조국", ["국산", "수입"])
     v_type = st.selectbox("차종", ["승용형", "다목적형", "전기/수소", "화물차"])
-    
     if v_type == "화물차":
         displacement = 0
         cargo_ton = st.number_input("최대 적재용량(톤)", value=1.0, step=0.5)
     else:
         displacement = st.number_input("배기량(cc)", value=2000, step=100)
         cargo_ton = 0.0
-        
     reg_year = st.number_input("등록년도", value=2022)
     reg_month = st.slider("등록월", 1, 12, 1)
 
@@ -123,9 +119,6 @@ with col2:
     paint_cost = st.number_input("외판 도색 건당 비용(만원)", value=10, step=1)
     auction_fee = st.slider("수수료율(%)", 0.0, 5.0, 2.2)
 
-# ==========================================
-# 2. 사고 및 도색 입력
-# ==========================================
 all_parts = {
     "외판": ["후드", "프론트 펜더(좌)", "프론트 펜더(우)", "앞도어(좌)", "앞도어(우)", "뒷도어(좌)", "뒷도어(우)", "트렁크 리드", "쿼터 패널(좌)", "쿼터 패널(우)", "루프 패널"],
     "골격": ["프론트 패널", "리어 패널", "트렁크 플로어", "사이드 멤버(좌)", "사이드 멤버(우)", "휠 하우스(좌)", "휠 하우스(우)", "대쉬 패널"]
@@ -150,9 +143,6 @@ for i, p in enumerate(all_parts["외판"]):
     if cols[i % 4].checkbox(f"{p} 도색", key=f"paint_{p}"):
         painting_inputs.append(p)
 
-# ==========================================
-# 3. 산출하기
-# ==========================================
 st.divider()
 if st.button("🚀 최종 매입가 산출하기", type="primary"):
     engine = KautoStandardEvaluator(v_type, (origin=="수입"), displacement, cargo_ton, reg_year, reg_month, eval_year, eval_month)
@@ -166,18 +156,23 @@ if st.button("🚀 최종 매입가 산출하기", type="primary"):
     std_price = base_price * (rate / 100)
     final_bid = (std_price - total_penalty - fixed_cost - margin) / (1 + auction_fee/100)
 
+    # 결과 표시
     col_r1, col_r2 = st.columns(2)
     col_r1.metric("추정 매입가", f"{int(std_price):,} 만원")
     col_r1.metric("최종 최고 입찰가", f"{int(max(0, final_bid)):,} 만원")
 
     with col_r2:
-        st.write("### 📋 감가 상세 내역")
-        if len(painting_inputs) > 0:
-            st.write(f"✅ **도색 필요 외판 총 {len(painting_inputs)}개** (개당 {paint_cost}만원 적용)")
+        st.write("### 🧮 산출 상세 리포트")
+        st.write(f"- **사용 월수**: {months}개월 ({reg_year}.{reg_month} → {eval_year}.{eval_month})")
+        st.write(f"- **감가율 적용**: {rate}% (잔존가치)")
         
+        if len(painting_inputs) > 0:
+            st.write(f"- **외판 도색**: 총 {len(painting_inputs)}개 (개당 {paint_cost}만원 적용)")
+        
+        st.write("### 📋 감가 요인 내역")
         if acc_logs:
             st.table(pd.DataFrame(acc_logs))
         else:
             st.write("감가 요인이 없습니다.")
-else:
-    st.info("차량 정보를 입력하고 하단의 '산출하기' 버튼을 눌러주세요.")
+            
+        st.info(f"산출식: (정상가 {int(std_price)}만원 - 감가합계 {total_penalty}만원 - 고정비 {fixed_cost}만원 - 마진 {margin}만원) / (1 + 수수료 {auction_fee}%)")
