@@ -92,7 +92,7 @@ class OfficialMarketEvaluator:
 
         market_price_table = {
             "국산": {"1랭크": 40, "2랭크": 100, "A랭크": 200, "B랭크": 350, "C랭크": 500},
-            "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
+            "수입": {"1랭크": 80, "2랭8크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
         }
         
         origin_key = "수입" if self.is_import else "국산"
@@ -261,4 +261,4 @@ if st.button("📊 약관식 기준 최고 입찰가 산출", type="primary", us
             st.warning(f"• {p_name} ── {log_txt}")
 
     st.markdown("---")
-    st.info(f"💡 **최종 서머리 브리핑**: 본 차량은 행정안전부 고시 기준에 의해 **{metrics['residual_rate'] * 100:.1f}%**의 잔가율이 확보되어 **{round(metrics['base_evaluated_price'], 1):?}만 원**이 최초 기준 가격으로 설정되었습니다. 이후 사고 감가 및 부대비용을 역산한 최종 낙찰 마지노선은 **[{max_bid_price:,}만 원]** 입니다.")
+    st.info(f"💡 **최종 서머리 브리핑**: 본 차량은 행정안전부 고시 기준에 의해 **{metrics['residual_rate'] * 100:.1f}%**의 잔가율이 확보되어 **{round(metrics['base_evaluated_price'], 1):,}만 원**이 최초 기준 가격으로 설정되었습니다. 이후 사고 감가 및 부대비용을 역산한 최종 낙찰 마지노선은 **[{max_bid_price:,}만 원]** 입니다.")
