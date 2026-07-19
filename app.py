@@ -6,7 +6,7 @@ import math
 st.set_page_config(page_title="공식 감가율 기준 경매 매입 시스템", page_icon="🚗", layout="wide")
 
 # ==========================================
-# [데이터 고정] 보내주신 1~180 감가율 계수표 데이터 매핑
+# [데이터 고정] 1~180 감가율 계수표 데이터 매핑
 # ==========================================
 DEPRECIATION_TABLE = {
     1: 100.0, 2: 98.96, 3: 97.92, 4: 96.88, 5: 95.85, 6: 94.81, 7: 93.77, 8: 92.74, 9: 91.7, 10: 90.66,
@@ -30,7 +30,7 @@ DEPRECIATION_TABLE = {
 }
 
 # ==========================================
-# 1. 약관 규정 기준 공식 연산 엔진 (보정 공식 추가)
+# 1. 보정 공식 연산 엔진 (경과월 기반 수정)
 # ==========================================
 class OfficialMarketEvaluator:
     def __init__(self, is_import: bool, car_type: str, reg_year: int, reg_month: int, base_price_manwon: int, eval_year: int, eval_month: int, promotion_discount: int):
@@ -41,41 +41,43 @@ class OfficialMarketEvaluator:
         self.base_price_manwon = base_price_manwon
         self.current_year = eval_year
         self.current_month = eval_month
-        self.promotion_discount = promotion_discount # 신차 프로모션 할인 금액
+        self.promotion_discount = promotion_discount
 
     def calculate_official_metrics(self):
-        """제8조, 제11조, 제12조에 의거한 공식 및 보정가격 산출"""
-        # 1. 사용년 산출식
+        # 1. 사용년 및 잔여월수 산출
         usage_years = self.current_year - self.reg_year
         if usage_years < 0: usage_years = 0
-
-        # 2. 잔여월수 산출식
         remaining_months = self.current_month - self.reg_month
 
-        # 3. 감가율 계수 산출
+        # 2. 감가율 계수(총 경과개월 인덱스) 산출
         factor_score = 11 + (usage_years * 12) + remaining_months
         lookup_key = max(1, min(180, factor_score))
 
-        # 4. 감가율표 매칭 감가율(%) 및 기본 잔가율(%)
-        factor_depreciation_rate = DEPRECIATION_TABLE.get(lookup_key, 12.65)
-        residual_rate_percent = factor_depreciation_rate # 기준가 산출의 핵심 비율
-
-        # 원래의 기준가액(격) 계산
+        # 3. 감가율표 기본 잔가율(%) 매칭
+        residual_rate_percent = DEPRECIATION_TABLE.get(lookup_key, 12.65)
         raw_base_price = self.base_price_manwon * (residual_rate_percent / 100.0)
 
         # ------------------------------------------
-        # 🌟 [제11조 신규 반영] 기준가격 보정 연산 시작
+        # 🌟 [제11조 수정 반영] 경과월의 분기 위치 판별
         # ------------------------------------------
-        # (1) ⓐ 월별 보정 값 계산
-        month_loss_rate = 0
-        if self.current_month in [2, 5, 8, 11]:
-            month_loss_rate = 0.01  # 1%
-        elif self.current_month in [3, 6, 9, 12]:
-            month_loss_rate = 0.02  # 2%
+        # 총 경과개월(나이)이 3으로 나누어 떨어지는 구조를 이용해 분기 첫째/둘째/셋째 달을 판별합니다.
+        # factor_score % 3 결과가 0이면 분기 3번째 달, 2면 2번째 달, 1이면 1번째 달입니다.
+        cycle_position = factor_score % 3
         
+        month_loss_rate = 0.0
+        position_name = "분기 첫 번째 월 (보정 없음)"
+        
+        if cycle_position == 2:
+            month_loss_rate = 0.01  # 2번째 달 = 1% 감가
+            position_name = "분기 두 번째 월 (1% 감가)"
+        elif cycle_position == 0:
+            month_loss_rate = 0.02  # 3번째 달 = 2% 감가
+            position_name = "분기 세 번째 월 (2% 감가)"
+
+        # ⓐ 월별 보정 값 = 기준가액 × 월별 감가율
         month_correction_val = raw_base_price * month_loss_rate
 
-        # (2) ⓑ 특성값 보정 (프로모션 감액) 계산
+        # (2) ⓑ 특성값 보정 (프로모션 감액)
         promo_cut = 0
         if self.promotion_discount >= 800: promo_cut = 800
         elif self.promotion_discount >= 600: promo_cut = 600
@@ -89,17 +91,16 @@ class OfficialMarketEvaluator:
         corrected_base_price = raw_base_price - (month_correction_val + feature_correction_val)
         corrected_base_price = max(0.0, corrected_base_price)
 
-        # ------------------------------------------
-        # 🌟 [제12조 신규 반영] 전년도 보정가격 계산
-        # ------------------------------------------
+        # (4) 제12조 전년도 보정가격 계산
         prev_year_corrected_price = math.ceil(corrected_base_price + (corrected_base_price * 0.10))
 
         return {
             "usage_years": usage_years,
             "remaining_months": remaining_months,
             "factor_score": factor_score,
-            "factor_depreciation_rate": factor_depreciation_rate,
+            "factor_depreciation_rate": residual_rate_percent,
             "raw_base_price": raw_base_price,
+            "position_name": position_name,
             "month_correction_val": month_correction_val,
             "month_loss_rate_percent": month_loss_rate * 100,
             "promo_cut": promo_cut,
@@ -109,192 +110,104 @@ class OfficialMarketEvaluator:
         }
 
     def calculate_market_accident_penalty(self, selected_accident):
-        """실전 시장 감가 테이블 (국산/수입 차별화 적용)"""
-        if not selected_accident:
-            return 0, {}
-
+        if not selected_accident: return 0, {}
         market_price_table = {
             "국산": {"1랭크": 40, "2랭크": 100, "A랭크": 200, "B랭크": 350, "C랭크": 500},
             "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
         }
-        
         origin_key = "수입" if self.is_import else "국산"
         active_table = market_price_table[origin_key]
-        
         total_penalty = 0
         detail_logs = {}
-        
         for part, data in selected_accident.items():
             rank = data["rank"]
             status = data["status"]
-            
             base_penalty = active_table.get(rank, 0)
             repair_factor = 1.0 if status == "교환(X)" else 0.6
             current_penalty = int(base_penalty * repair_factor)
-            
             total_penalty += current_penalty
-            detail_logs[part] = f"{status} ──> 공식/시장 감가: -{current_penalty}만 원 ({rank} 기준)"
-            
+            detail_logs[part] = f"{status} ──> 공식 감가: -{current_penalty}만 원"
         return total_penalty, detail_logs
-
 
 # ==========================================
 # 2. Streamlit 웹 UI 화면 구성
 # ==========================================
 st.title("🚗 약관 규격 기준 중고차 경매 매입 산출기")
-st.caption("제8조(사용년수), 제11조(기준가격 보정) 및 제12조(전년도 보정가격)를 완벽히 연동하여 연산합니다.")
+st.caption("차량의 실질 경과 개월 수를 추적하여 분기별 보정을 정확히 적용합니다.")
 
 today = datetime.today()
-
-# 사이드바 평가 시점 설정
-st.sidebar.header("📅 평가 시점 설정 (기준가격 산출용)")
+st.sidebar.header("📅 평가 시점 설정")
 eval_year = st.sidebar.number_input("평가 연도", min_value=2000, max_value=2100, value=today.year)
 eval_month = st.sidebar.slider("평가 월", min_value=1, max_value=12, value=today.month)
 
 all_car_parts = {
-    "🔻 외판 단순 교환/판금 (1랭크)": {
-        "후드": "1랭크", "프론트 펜더(좌)": "1랭크", "프론트 펜더(우)": "1랭크",
-        "앞도어(좌)": "1랭크", "앞도어(우)": "1랭크", "뒷도어(좌)": "1랭크", "뒷도어(우)": "1랭크",
-        "트렁크 리드": "1랭크"
-    },
-    "🔻 외판 주요 부위 (2랭크)": {
-        "쿼터 패널(좌)": "2랭크", "쿼터 패널(우)": "2랭크", "루프 패널": "2랭크"
-    },
-    "🔺 주요 골격 경미 사고 (A랭크)": {
-        "프론트 패널": "A랭크", "리어 패널": "A랭크", "트렁크 플로어 패널": "A랭크"
-    },
-    "🔺 주요 골격 중대 사고 (B/C랭크)": {
-        "사이드 멤버(좌)": "B랭크", "사이드 멤버(우)": "B랭크", "휠 하우스(좌)": "B랭크", "휠 하우스(우)": "B랭크", "대쉬 패널": "C랭크"
-    }
+    "🔻 외판 단순 교환/판금 (1랭크)": {"후드": "1랭크", "앞도어(좌)": "1랭크", "앞도어(우)": "1랭크"},
+    "🔻 외판 주요 부위 (2랭크)": {"쿼터 패널(좌)": "2랭크", "쿼터 패널(우)": "2랭크"},
+    "🔺 주요 골격 사고 (A/B/C랭크)": {"프론트 패널": "A랭크", "휠 하우스(좌)": "B랭크", "대쉬 패널": "C랭크"}
 }
 
-# 섹션 1: 차량 조건 설정
-st.header("📝 1. 차량 기본 정보 및 약관 보정 요소 입력")
+st.header("📝 1. 차량 기본 정보 및 프로모션 입력")
 col1, col2, col3 = st.columns(3)
-
 with col1:
     origin = st.selectbox("차량 구분", ["국산", "수입"])
-    car_type = st.selectbox("행정 규격 차종 구분 (제9조)", ["승용, 다목적형", "화물"])
-    base_price = st.number_input("신차 출고 가격 (부가세 포함 / 만원)", min_value=0, value=4000, step=100)
-
+    car_type = st.selectbox("행정 규격 차종 구분", ["승용, 다목적형", "화물"])
+    base_price = st.number_input("신차 출고 가격 (만원)", min_value=0, value=4000, step=100)
 with col2:
-    reg_year = st.number_input("최초등록년도", min_value=2000, max_value=eval_year, value=eval_year-4, step=1)
+    reg_year = st.number_input("최초등록년도", min_value=2000, max_value=eval_year, value=eval_year-2, step=1)
     reg_month = st.slider("최초등록월", min_value=1, max_value=12, value=1)
-    # 🌟 제11조 특성값 보정을 위한 신차 프로모션 입력 필드 신설
-    promotion_discount = st.number_input("🎁 신차 출고 당시 프로모션 할인액 (만원)", min_value=0, value=0, step=50)
-
+    promotion_discount = st.number_input("🎁 신차 프로모션 할인액 (만원)", min_value=0, value=300, step=50)
 with col3:
-    target_margin = st.number_input("확보할 딜러 매입 마진 (만원)", min_value=0, value=150, step=10)
-    fixed_cost = st.number_input("상사 이전비 및 부대비용 (만원)", min_value=0, value=50)
-    paint_unit_cost = st.number_input("🎨 판당 현장 도색 단가 (만원)", min_value=0, value=15 if origin == "국산" else 25, step=5)
-    auction_fee_rate = st.slider("경매장 낙찰 수수료율 (%)", min_value=0.0, max_value=5.0, value=2.2, step=0.1)
+    target_margin = st.number_input("확보할 딜러 마진 (만원)", min_value=0, value=150)
+    fixed_cost = st.number_input("부대비용 (만원)", min_value=0, value=50)
+    paint_unit_cost = st.number_input("🎨 도색 단가 (만원)", min_value=0, value=15)
+    auction_fee_rate = st.slider("경매장 수수료율 (%)", min_value=0.0, max_value=5.0, value=2.2)
 
 st.markdown("---")
-
-# 섹션 2: 사고 감가 선택
-st.header("🛠️ 2. 공식 사고 수리 이력 체크")
+st.header("🛠️ 2. 사고 수리 이력 체크")
 selected_accident = {}
 for section_title, parts in all_car_parts.items():
     st.markdown(f"##### {section_title}")
-    part_items = list(parts.items())
-    for i in range(0, len(part_items), 4):
-        chunk = part_items[i:i+4]
-        cols = st.columns(4)
-        for idx, (part_name, rank) in enumerate(chunk):
-            with cols[idx]:
-                status = st.selectbox(f"{part_name}", ["정상", "교환(X)", "판금/용접(W)"], key=f"acc_{part_name}")
-                if status != "정상":
-                    selected_accident[part_name] = {"rank": rank, "status": status}
+    cols = st.columns(3)
+    for idx, (part_name, rank) in enumerate(parts.items()):
+        with cols[idx % 3]:
+            status = st.selectbox(f"{part_name}", ["정상", "교환(X)", "판금/용접(W)"], key=f"acc_{part_name}")
+            if status != "정상":
+                selected_accident[part_name] = {"rank": rank, "status": status}
 
 st.markdown("---")
-
-# 섹션 3: 외관 도색 선택
-st.header("🎨 3. 현장 도색 필요 부위")
-selected_paint_parts = []
-for section_title, parts in all_car_parts.items():
-    if "골격" in section_title: continue
-    st.markdown(f"##### {section_title}")
-    part_items = list(parts.items())
-    for i in range(0, len(part_items), 4):
-        chunk = part_items[i:i+4]
-        cols = st.columns(4)
-        for idx, (part_name, rank) in enumerate(chunk):
-            with cols[idx]:
-                if st.checkbox(f"{part_name} 도색 필요", key=f"paint_{part_name}"):
-                    selected_paint_parts.append(part_name)
-
-st.markdown("---")
-
-# 섹션 4: 연산 실행 및 대시보드 출력
-if st.button("📊 약관 보정식 기준 최고 입찰가 산출", type="primary", use_container_width=True):
+if st.button("📊 수정된 약관 보정식 기준 최고 입찰가 산출", type="primary", use_container_width=True):
     is_imp = (origin == "수입")
-    
-    # 엔진 구동 (프로모션 할인값 추가 반영)
     engine = OfficialMarketEvaluator(
-        is_import=is_imp, 
-        car_type=car_type, 
-        reg_year=reg_year, 
-        reg_month=reg_month, 
-        base_price_manwon=base_price,
-        eval_year=eval_year,
-        eval_month=eval_month,
+        is_import=is_imp, car_type=car_type, reg_year=reg_year, reg_month=reg_month,
+        base_price_manwon=base_price, eval_year=eval_year, eval_month=eval_month,
         promotion_discount=promotion_discount
     )
     
-    # 공식 보정 계수 리포트 받아오기
     metrics = engine.calculate_official_metrics()
-    
-    # 사고 및 도색 감가 연산
     accident_penalty, logs = engine.calculate_market_accident_penalty(selected_accident)
-    paint_count = len(selected_paint_parts)
-    paint_penalty = paint_count * paint_unit_cost
-
-    # 🌟 중요: 이제 보정 전 가격이 아니라 '제11조 최종 보정가격'을 기준으로 차감합니다.
-    final_car_value = max(0, metrics["corrected_base_price"] - accident_penalty - paint_penalty)
-
-    # 역산 공식으로 최고 입찰 마지노선(Max Bid) 도출
-    fee_factor = 1 + (auction_fee_rate / 100)
-    max_bid_price = (final_car_value - fixed_cost - target_margin) / fee_factor
-    max_bid_price = max(0, round(max_bid_price))
-
-    # 결과 화면 대시보드 출력
-    st.header(f"🎯 약관 보정 완료 산출 리포트 ({eval_year}년 {eval_month}월 기준)")
     
-    # 1단계 크리티컬 메트릭 박스
+    final_car_value = max(0, metrics["corrected_base_price"] - accident_penalty)
+    fee_factor = 1 + (auction_fee_rate / 100)
+    max_bid_price = max(0, round((final_car_value - fixed_cost - target_margin) / fee_factor))
+
+    st.header(f"🎯 산출 리포트 (차량 경과 나이: {metrics['factor_score']}개월 차)")
+    
     col_res1, col_res2, col_res3 = st.columns(3)
     with col_res1:
-        st.metric(label="📊 나. 최종 보정가격 (제11조 적용 완료)", value=f"{round(metrics['corrected_base_price'], 1):,} 만원")
+        st.metric(label="📊 최종 보정가격 (제11조)", value=f"{round(metrics['corrected_base_price'], 1):?} 만원")
     with col_res2:
-        st.metric(label="📉 사고/상품화 총 감가액", value=f"-{accident_penalty + paint_penalty:,} 만원")
+        st.metric(label="📈 제12조 전년도 보정가격", value=f"{metrics['prev_year_corrected_price']:,} 만원")
     with col_res3:
-        st.metric(label="🏁 최종 추천 최고 입찰가 (Max Bid)", value=f"{max_bid_price:,} 만원")
+        st.metric(label="🏁 최종 최고 입찰가 (Max Bid)", value=f"{max_bid_price:,} 만원")
 
-    # 2단계 상세 보정 내역 테이블 제공
-    st.subheader("📋 제11조 및 제12조 상세 보정산출 명세")
-    
+    st.subheader("📋 월별 보정 및 특성값 보정 매칭 내역")
     metrics_data = {
-        "보정 항목 및 조항": [
-            "보정 전 원시 기준가액",
-            "제11조 2항 가) ⓐ 월별 보정액", 
-            "제11조 2항 나) ⓑ 특성값 보정액", 
-            "✨ 제11조 최종 보정가격 결과", 
-            "📈 제12조 전년도 보정가격 (10% 가산)"
-        ],
-        "연산 및 적용 값": [
-            f"{round(metrics['raw_base_price'], 1):,} 만원 (신차 {base_price}만원 × 잔가율 {metrics['factor_depreciation_rate']}%)",
-            f"-{round(metrics['month_correction_val'], 1):,} 만원 (평가월 {eval_month}월에 따른 감가율 {metrics['month_loss_rate_percent']}% 적용)",
-            f"-{round(metrics['feature_correction_val'], 1):,} 만원 (할인액 {promotion_discount}만 ➡️ 감액기준 {metrics['promo_cut']}만 × 잔가율)",
-            f"**{round(metrics['corrected_base_price'], 1):,} 만원** (원시가격 - 월별보정 - 특성값보정)",
-            f"{metrics['prev_year_corrected_price']:,} 만원 (최종 보정가의 10% 올림 가산)"
+        "보정 항목": ["경과 개월수 기준 위치", "ⓐ 월별 보정액 차감", "ⓑ 특성값 보정액 차감", "최종 보정 결과"],
+        "적용 값 및 산출 근거": [
+            f"{metrics['position_name']} (인덱스 {metrics['factor_score']})",
+            f"-{round(metrics['month_correction_val'], 1):?} 만원 (기준가액의 {metrics['month_loss_rate_percent']:.1f}% 감가)",
+            f"-{round(metrics['feature_correction_val'], 1):?} 만원 (구간 감액 {metrics['promo_cut']}만 × 잔가율)",
+            f"**{round(metrics['corrected_base_price'], 1):?} 만원**"
         ]
     }
     st.table(metrics_data)
-
-    # 사고 발생 시 상세 로그 출력
-    if logs:
-        st.subheader("💥 선택된 감가 대상 수리 이력 명세")
-        for p_name, log_txt in logs.items():
-            st.warning(f"• {p_name} ── {log_txt}")
-
-    st.markdown("---")
-    st.info(f"💡 **보정 브리핑**: {eval_month}월 평가에 따른 월별 감가 **{metrics['month_loss_rate_percent']}%**와 신차 프로모션 감액 기준 **[{metrics['promo_cut']}만 원]**에 대한 특성값 보정이 모두 반영되었습니다. 이에 따라 최종 법정 보정가격은 **{round(metrics['corrected_base_price'], 1):,}만 원**으로 갱신되었으며, 이를 기준으로 역산한 최종 낙찰 마지노선은 **[{max_bid_price:,}만 원]** 입니다.")
