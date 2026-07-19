@@ -33,7 +33,7 @@ DEPRECIATION_TABLE = {
 class OfficialMarketEvaluator:
     def __init__(self, is_import: bool, car_type: str, reg_year: int, reg_month: int, base_price_manwon: int):
         self.is_import = is_import
-        self.car_type = car_type  # "승용, 다목적형" 또는 "화물"
+        self.car_type = car_type  
         self.reg_year = reg_year
         self.reg_month = reg_month
         self.base_price_manwon = base_price_manwon
@@ -43,20 +43,18 @@ class OfficialMarketEvaluator:
         self.current_month = 7
 
     def calculate_official_metrics(self):
-        """제8조 및 제9조에 의거한 공식 사용년, 사용월, 계수, 잔가율 및 기준가격 산출"""
+        """제8조 및 제9조에 의거한 공식 사용년, 잔여월수, 계수, 잔가율 및 기준가격 산출"""
         # 1. 사용년 산출식 = 평가연도의 년 - 최초등록연도의 년
         usage_years = self.current_year - self.reg_year
         if usage_years < 0: usage_years = 0
 
-        # 2. 사용월 산출식 = (사용년 × 12) + 잔여월수 (평가월 - 등록월)
+        # 2. 잔여월수 산출식 = 평가연도의 월 - 최초등록연도의 월 (※ 54개월 전체가 아닌 당해 연도 차이 월수)
         remaining_months = self.current_month - self.reg_month
-        usage_months = (usage_years * 12) + remaining_months
-        if usage_months < 0: usage_months = 0
 
-        # 3. 감가율 계수 산출 = 11 + (사용년 × 12) + 평가월 수
-        factor_score = 11 + (usage_years * 12) + usage_months
+        # 3. 감가율 계수 산출 = 11 + (사용년 × 12) + 평가월 수(잔여월수 대입)
+        factor_score = 11 + (usage_years * 12) + remaining_months
         
-        # 계수 값 보정 (테이블 범위 한정)
+        # 계수 값 안전 범위 보정
         lookup_key = factor_score
         if lookup_key < 1: lookup_key = 1
         if lookup_key > 180: lookup_key = 180
@@ -94,12 +92,11 @@ class OfficialMarketEvaluator:
                 else: residual_rate = 0.372
 
         # 5. 가. 기준가격 산출식 = 신차 출고 가격 × 감가율 계수의 감가율(%)
-        # (표의 수치가 퍼센트 단위이므로 / 100 적용)
         base_evaluated_price = self.base_price_manwon * (factor_depreciation_rate / 100.0)
 
         return {
             "usage_years": usage_years,
-            "usage_months": usage_months,
+            "remaining_months": remaining_months,
             "factor_score": factor_score,
             "factor_depreciation_rate": factor_depreciation_rate,
             "residual_rate": residual_rate,
@@ -261,15 +258,15 @@ if st.button("📊 약관식 기준 최고 입찰가 산출", type="primary", us
     metrics_data = {
         "산출 항목": [
             "제8조 1항 가. 사용년 산출", 
-            "제8조 1항 나. 사용월(잔여월 반영) 산출", 
-            "제8조 1항 나. 감가율 계수 결과 값", 
+            "제8조 1항 나. 단서조항 잔여월수", 
+            "감가율 계수 결과 값", 
             "★ 정밀 감가율표 연동 매칭 감가율(%)", 
             "제9조 고시 기본 잔가율 (%)"
         ],
         "적용 공식 및 값": [
             f"{metrics['usage_years']}년 경과 (2026 - {reg_year})",
-            f"{metrics['usage_months']}개월 ({metrics['usage_years']}년 × 12 + 잔여 {7 - reg_month}개월)",
-            f"최종 계수: {metrics['factor_score']} (공식: 11 + {metrics['usage_years'] * 12} + {metrics['usage_months']})",
+            f"{metrics['remaining_months']}개월 (평가월 7월 - 등록월 {reg_month}월)",
+            f"최종 계수: {metrics['factor_score']} (공식: 11 + {metrics['usage_years'] * 12} + {metrics['remaining_months']})",
             f"**{metrics['factor_depreciation_rate']}%** (제2항 감가율표 매칭 값)",
             f"{metrics['residual_rate'] * 100:.1f}% (연식 기준 참고용 고시)"
         ]
@@ -283,4 +280,4 @@ if st.button("📊 약관식 기준 최고 입찰가 산출", type="primary", us
             st.warning(f"• {p_name} ── {log_txt}")
 
     st.markdown("---")
-    st.info(f"💡 **최종 서머리 브리핑**: 본 차량은 행정안전부 고시 계수 식에 의해 산출된 계수 **[{metrics['factor_score']}]** 값에 매핑되어, 제공해주신 감가율표 기준 **{metrics['factor_depreciation_rate']}%**의 감가율이 반영되었습니다. 이에 따라 계산된 최초 기준 가격은 **{round(metrics['base_evaluated_price'], 1):,}만 원**이며, 사고 및 상품화 비용을 역산한 최종 낙찰 마지노선은 **[{max_bid_price:,}만 원]** 입니다.")
+    st.info(f"💡 **최종 서머리 브리핑**: 본 차량은 행정안전부 고시 계수 식에 의해 산출된 최종 계수 **[{metrics['factor_score']}]** 값에 매핑되어, 제공해주신 감가율표 기준 **{metrics['factor_depreciation_rate']}%**의 감가율이 반영되었습니다. 이에 따라 계산된 최초 기준 가격은 **{round(metrics['base_evaluated_price'], 1):,}만 원**이며, 사고 및 상품화 비용을 역산한 최종 낙찰 마지노선은 **[{max_bid_price:,}만 원]** 입니다.")
