@@ -1,24 +1,21 @@
-import hashlib
 import streamlit as st
 
-# 무조건 맨 첫 줄에 위치해야 합니다! (에러 방지)
+# 🚨 Streamlit 설정은 무조건 코드 최상단에 딱 한 번만!
 st.set_page_config(page_title="실전 딜러형 경매 매입 시스템", page_icon="🚗", layout="wide")
 
 # ==========================================
-# 0. 보안 인증 엔진 (car77 매칭 보완)
+# 0. 단순 직관적인 비밀번호 검증 엔진
 # ==========================================
-CORRECT_PASSWORD_HASH = "6543b59df5c4a5c93a027376c9b4e5781a8b94fde185e493e88849764516ba7d"
-
 def check_password():
-    """로그인 상태를 확인하고 로그인 폼을 보여주는 함수"""
+    """글자 그대로 'car77'과 비교하는 심플한 로그인 함수"""
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
-    # 이미 인증을 통과한 상태라면 로그인 화면을 스킵하고 바로 True 반환
+    # 이미 로그인 성공했다면 바로 본문으로 통과
     if st.session_state["authenticated"]:
         return True
 
-    # 로그인 화면 중앙 정렬을 위한 레이아웃 구획
+    # 로그인 화면 중앙 정렬 구획
     _, center_col, _ = st.columns([1, 2, 1])
     
     with center_col:
@@ -27,28 +24,28 @@ def check_password():
         st.caption("본 프로그램은 승인된 딜러 전용 시스템입니다. 접근 권한이 필요합니다.")
         
         with st.form("login_form"):
-            password_input = st.text_input("접근 비밀번호를 입력하세요 (힌트: car77)", type="password")
+            # 입력창 (car77 입력 시 대소문자나 공백 실수를 방지하도록 셋팅)
+            password_input = st.text_input("접근 비밀번호를 입력하세요 (비밀번호:car77)", type="password")
             submit_button = st.form_submit_button("인증하기", type="primary", use_container_width=True)
             
             if submit_button:
-                # 공백을 완전히 제거하고 소문자로 변환하여 매칭 확률을 높임
-                pure_password = password_input.strip()
-                input_hash = hashlib.sha256(pure_password.encode()).hexdigest()
+                # 입력된 값 앞뒤 공백을 자르고 무조건 소문자로 변경
+                processed_input = password_input.strip().lower()
                 
-                if input_hash == CORRECT_PASSWORD_HASH:
+                # 💡 글자 그대로 'car77' 인지 직관적으로 검사합니다.
+                if processed_input == "car77":
                     st.session_state["authenticated"] = True
                     st.success("🔓 인증 성공! 잠시만 기다려주세요...")
-                    st.rerun()  # 화면 즉시 새로고침하여 본문 실행
+                    st.rerun()  # 화면 새로고침하여 본문 실행
                 else:
-                    st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
-                    # 디버깅용 힌트 (비밀번호를 맞게 쳤는지 확인용)
-                    if pure_password != "car77":
-                        st.info(f"💡 현재 입력하신 값은 '{pure_password}' 입니다. 'car77'을 입력해 주세요.")
+                    st.error("❌ 비밀번호가 틀렸습니다. 영어 소문자로 'car77'을 정확히 입력했는지 확인해 주세요.")
+                    if password_input:
+                        st.info(f"💡 현재 입력창에 쓰신 글자: '{password_input}'")
                     
     return False
 
 # --------------------------------------------------
-# [보안 필터] 인증이 완료되어야만 아래 메인 계산기가 작동합니다.
+# [보안 필터] 인증이 성공(True)해야만 아래 실제 프로그램이 작동합니다.
 # --------------------------------------------------
 if check_password():
 
@@ -131,7 +128,6 @@ if check_password():
     # ==========================================
     # 2. Streamlit 웹 UI 화면 구성 (본문)
     # ==========================================
-    # 중복되던 st.set_page_config 문구 제거 완료
     st.title("🚗 실전 딜러형 중고차 경매 입찰가 산출기")
     st.caption("자격검정 시험용 루트 공식을 제거하고, 매매단지 딜러들이 시세 산정 시 차감하는 '리얼 시장 정액 감가'를 반영합니다.")
 
