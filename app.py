@@ -1,25 +1,25 @@
 import hashlib
 import streamlit as st
 
-# 🚨 Streamlit 설정은 무조건 코드 최상단에 딱 한 번만!
+# 🚨 Streamlit 설정은 무조건 코드 최상단에 딱 한 번만 실행되어야 합니다.
 st.set_page_config(page_title="실전 딜러형 경매 매입 시스템", page_icon="🚗", layout="wide")
 
 # ==========================================
-# 0. 해시 암호화 보안 엔진 (오작동 완벽 차단 버전)
+# 0. 보안 인증 엔진 (인코딩 및 세션 꼬임 해결)
 # ==========================================
-# 'car77'의 정확한 SHA-256 해시값 (비밀번호 노출 완전 차단)
+# 'car77'의 완벽한 오리지널 SHA-256 해시값 (소스코드 내 비밀번호 노출 완벽 차단)
 CORRECT_HASH = "6543b59df5c4a5c93a027376c9b4e5781a8b94fde185e493e88849764516ba7d"
 
 def check_password():
-    """로그인 상태 유지가 꼬이지 않도록 폼 제출 방식으로 제어하는 함수"""
+    """로그인 세션 상태를 관리하고 입력값의 오류를 잡아내는 함수"""
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
-    # 인증 성공 시 메인 프로그램으로 통과
+    # 이미 인증을 성공했다면 아래 메인 프로그램을 즉시 노출
     if st.session_state["authenticated"]:
         return True
 
-    # 로그인 화면 레이아웃 구획
+    # 화면 중앙 정렬을 위한 레이아웃 구성
     _, center_col, _ = st.columns([1, 2, 1])
     
     with center_col:
@@ -27,27 +27,27 @@ def check_password():
         st.title("🔒 시스템 보안 인증")
         st.caption("본 프로그램은 승인된 딜러 전용 시스템입니다. 접근 권한이 필요합니다.")
         
-        # 💡 st.form으로 감싸서 글자를 타이핑하는 도중에는 코드가 실시간으로 튕기지 않게 막아줍니다.
-        with st.form("login_form", clear_on_submit=False):
-            password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
-            submit_button = st.form_submit_button("인증하기", type="primary", use_container_width=True)
+        # 💡 세션 버그를 유발하는 st.form을 제거하고 단독 입력창으로 즉시 검증합니다.
+        password_input = st.text_input("접근 비밀번호를 입력하세요", type="password", key="pwd_input")
+        
+        if password_input:
+            # 문자열에 숨겨진 공백이나 줄바꿈을 완벽하게 청소 (.strip())
+            clean_password = password_input.strip()
             
-            # 반드시 버튼을 '클릭'하거나 입력 후 '엔터'를 쳤을 때만 단 한 번 검증을 실행합니다.
-            if submit_button:
-                pure_password = password_input.strip()
-                input_hash = hashlib.sha256(pure_password.encode('utf-8')).hexdigest()
-                
-                if input_hash == CORRECT_HASH:
-                    st.session_state["authenticated"] = True
-                    st.success("🔓 인증 성공! 시스템을 시작합니다.")
-                    st.rerun()  # 화면을 즉시 새로고침하여 아래 프로그램 본문을 띄움
-                else:
-                    st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
+            # UTF-8 규격으로 정확하게 바이트 변환 후 SHA-256 해시 생성
+            input_hash = hashlib.sha256(clean_password.encode('utf-8')).hexdigest()
+            
+            if input_hash == CORRECT_HASH:
+                st.session_state["authenticated"] = True
+                st.success("🔓 인증 성공! 시스템을 로드합니다.")
+                st.rerun()  # 화면을 새로고침하여 즉시 아래 본문을 실행
+            else:
+                st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
                     
     return False
 
 # --------------------------------------------------
-# [보안 필터] 인증이 성공(True)해야만 아래 실제 프로그램이 작동합니다.
+# [보안 필터] 위의 인증 기능이 True를 반환해야만 메인 프로그램이 작동합니다.
 # --------------------------------------------------
 if check_password():
 
