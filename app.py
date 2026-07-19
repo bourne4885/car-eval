@@ -35,7 +35,6 @@ class KautoStandardEvaluator:
         self.eval_year, self.eval_month = eval_year, eval_month
 
     def determine_grade(self):
-        # 등급 판정 로직 원형 그대로 복구
         if self.vehicle_type == "승용형" or self.vehicle_type == "다목적형":
             cc = self.displacement
             if cc >= 3600: return "특C"
@@ -64,7 +63,6 @@ class KautoStandardEvaluator:
 
     def get_age_depreciation_rate(self):
         total_months = ((self.eval_year - self.reg_year) * 12) + (self.eval_month - self.reg_month)
-        # 테이블의 최대치인 180개월을 벗어나지 않도록 클램핑
         coeff = max(1, min(180, total_months))
         return total_months, RATE_TABLE.get(coeff, 12.65)
 
@@ -79,7 +77,6 @@ class KautoStandardEvaluator:
         # 사고/교환 계산
         for part, data in accident_data.items():
             base = active_table.get(data["rank"], 0)
-            # 교환(X)은 100%, 판금(W)은 60% 적용 로직
             penalty = int(base * (1.0 if data["status"] == "교환(X)" else 0.6) * coeff)
             total_penalty += penalty
             logs.append({"부위": part, "분류": "사고/교환", "상태": data["status"], "감가액": penalty})
@@ -108,7 +105,6 @@ with col1:
     origin = st.selectbox("제조국", ["국산", "수입"])
     v_type = st.selectbox("차종", ["승용형", "다목적형", "전기/수소", "화물차"])
     
-    # 타입별 추가 입력
     if v_type == "화물차":
         displacement = 0
         cargo_ton = st.number_input("최대 적재용량(톤)", value=1.0, step=0.5)
@@ -124,18 +120,16 @@ with col2:
     base_price = st.number_input("무사고 정상 시세(만원)", value=2500, step=50)
     margin = st.number_input("희망 마진(만원)", value=150, step=10)
     fixed_cost = st.number_input("고정비(만원)", value=50, step=10)
-    paint_cost = st.number_input("도색 건당 비용(만원)", value=10, step=1)
+    paint_cost = st.number_input("외판 도색 건당 비용(만원)", value=10, step=1)
     auction_fee = st.slider("수수료율(%)", 0.0, 5.0, 2.2)
 
 # ==========================================
-# 2. 사고 및 도색 입력 (접히지 않음)
+# 2. 사고 및 도색 입력
 # ==========================================
 all_parts = {
     "외판": ["후드", "프론트 펜더(좌)", "프론트 펜더(우)", "앞도어(좌)", "앞도어(우)", "뒷도어(좌)", "뒷도어(우)", "트렁크 리드", "쿼터 패널(좌)", "쿼터 패널(우)", "루프 패널"],
     "골격": ["프론트 패널", "리어 패널", "트렁크 플로어", "사이드 멤버(좌)", "사이드 멤버(우)", "휠 하우스(좌)", "휠 하우스(우)", "대쉬 패널"]
 }
-
-# 랭크 정보 매핑
 ranks = {part: "1랭크" if part in all_parts["외판"][:8] else ("2랭크" if part in all_parts["외판"][8:] else ("A랭크" if part in all_parts["골격"][:3] else ("B랭크" if part in all_parts["골격"][3:7] else "C랭크"))) for part in all_parts["외판"] + all_parts["골격"]}
 
 st.divider()
@@ -149,7 +143,7 @@ for category, parts in all_parts.items():
         if status != "정상": accident_inputs[p] = {"rank": ranks[p], "status": status}
 
 st.divider()
-st.header("🎨 도색 및 스크래치 상태")
+st.header("🎨 외판 도색 필요 부위")
 painting_inputs = []
 cols = st.columns(4)
 for i, p in enumerate(all_parts["외판"]):
@@ -179,7 +173,7 @@ if st.button("🚀 최종 매입가 산출하기", type="primary"):
     with col_r2:
         st.write("### 📋 감가 상세 내역")
         if len(painting_inputs) > 0:
-            st.write(f"✅ **도색 부위 총 {len(painting_inputs)}개** (개당 {paint_cost}만원 적용)")
+            st.write(f"✅ **도색 필요 외판 총 {len(painting_inputs)}개** (개당 {paint_cost}만원 적용)")
         
         if acc_logs:
             st.table(pd.DataFrame(acc_logs))
