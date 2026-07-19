@@ -1,4 +1,5 @@
 import streamlit as st
+from datetime import datetime
 
 # 🚨 Streamlit 설정은 무조건 코드 최상단에 딱 한 번만!
 st.set_page_config(page_title="공식 감가율 기준 경매 매입 시스템", page_icon="🚗", layout="wide")
@@ -31,16 +32,16 @@ DEPRECIATION_TABLE = {
 # 1. 약관 규정 기준 공식 연산 엔진
 # ==========================================
 class OfficialMarketEvaluator:
-    def __init__(self, is_import: bool, car_type: str, reg_year: int, reg_month: int, base_price_manwon: int):
+    def __init__(self, is_import: bool, car_type: str, reg_year: int, reg_month: int, base_price_manwon: int, eval_year: int, eval_month: int):
         self.is_import = is_import
         self.car_type = car_type  
         self.reg_year = reg_year
         self.reg_month = reg_month
         self.base_price_manwon = base_price_manwon
         
-        # 기준 시점 (2026년 7월 고정)
-        self.current_year = 2026
-        self.current_month = 7
+        # 🌟 이제 고정값이 아니라 UI에서 입력받은 평가 시점을 대입합니다.
+        self.current_year = eval_year
+        self.current_month = eval_month
 
     def calculate_official_metrics(self):
         """제8조 및 제9조에 의거한 공식 사용년, 잔여월수, 계수, 잔가율 및 기준가격 산출"""
@@ -48,7 +49,7 @@ class OfficialMarketEvaluator:
         usage_years = self.current_year - self.reg_year
         if usage_years < 0: usage_years = 0
 
-        # 2. 잔여월수 산출식 = 평가연도의 월 - 최초등록연도의 월 (※ 54개월 전체가 아닌 당해 연도 차이 월수)
+        # 2. 잔여월수 산출식 = 평가연도의 월 - 최초등록연도의 월
         remaining_months = self.current_month - self.reg_month
 
         # 3. 감가율 계수 산출 = 11 + (사용년 × 12) + 평가월 수(잔여월수 대입)
@@ -139,6 +140,15 @@ class OfficialMarketEvaluator:
 st.title("🚗 약관 규격 기준 중고차 경매 매입 산출기")
 st.caption("제8조(사용연수와 사용월수) 및 제공해주신 1~180 정밀 감가율표 고시 산출식을 100% 적용하여 매입 마지노선을 연산합니다.")
 
+# 🌟 시스템 오늘 날짜 가져오기
+today = datetime.today()
+
+# 상단에 평가 기준년월 가이드 및 선택창 배치
+st.sidebar.header("📅 평가 시점 설정 (기준가격 산출용)")
+eval_year = st.sidebar.number_input("평가 연도", min_value=2000, max_value=2100, value=today.year)
+eval_month = st.sidebar.slider("평가 월", min_value=1, max_value=12, value=today.month)
+st.sidebar.info(f"💡 현재 **[{eval_year}년 {eval_month}월]** 기준으로 감가 계수를 계산합니다. 필요시 사이드바에서 변경 가능합니다.")
+
 all_car_parts = {
     "🔻 외판 단순 교환/판금 (1랭크)": {
         "후드": "1랭크", "프론트 펜더(좌)": "1랭크", "프론트 펜더(우)": "1랭크",
@@ -166,7 +176,7 @@ with col1:
     base_price = st.number_input("신차 출고 가격 (부가세 포함 / 만원)", min_value=0, value=4000, step=100)
 
 with col2:
-    reg_year = st.number_input("최초등록년도", min_value=2000, max_value=2026, value=2022, step=1)
+    reg_year = st.number_input("최초등록년도", min_value=2000, max_value=eval_year, value=eval_year-4, step=1)
     reg_month = st.slider("최초등록월", min_value=1, max_value=12, value=1)
     target_margin = st.number_input("확보할 딜러 매입 마진 (만원)", min_value=0, value=150, step=10)
 
@@ -215,13 +225,15 @@ st.markdown("---")
 if st.button("📊 약관식 기준 최고 입찰가 산출", type="primary", use_container_width=True):
     is_imp = (origin == "수입")
     
-    # 엔진 구동
+    # 엔진 구동 (입력된 평가년월 전달)
     engine = OfficialMarketEvaluator(
         is_import=is_imp, 
         car_type=car_type, 
         reg_year=reg_year, 
         reg_month=reg_month, 
-        base_price_manwon=base_price
+        base_price_manwon=base_price,
+        eval_year=eval_year,
+        eval_month=eval_month
     )
     
     # 공식 계수 연산 리포트 받아오기
@@ -241,7 +253,7 @@ if st.button("📊 약관식 기준 최고 입찰가 산출", type="primary", us
     max_bid_price = max(0, round(max_bid_price))
 
     # 결과 화면 대시보드 출력
-    st.header("🎯 약관 규정 감가율 산출 리포트 (2026년 7월 기준)")
+    st.header(f"🎯 약관 규정 감가율 산출 리포트 ({eval_year}년 {eval_month}월 기준)")
     
     # 1단계 크리티컬 메트릭 박스
     col_res1, col_res2, col_res3 = st.columns(3)
@@ -264,8 +276,8 @@ if st.button("📊 약관식 기준 최고 입찰가 산출", type="primary", us
             "제9조 고시 기본 잔가율 (%)"
         ],
         "적용 공식 및 값": [
-            f"{metrics['usage_years']}년 경과 (2026 - {reg_year})",
-            f"{metrics['remaining_months']}개월 (평가월 7월 - 등록월 {reg_month}월)",
+            f"{metrics['usage_years']}년 경과 ({eval_year} - {reg_year})",
+            f"{metrics['remaining_months']}개월 (평가월 {eval_month}월 - 등록월 {reg_month}월)",
             f"최종 계수: {metrics['factor_score']} (공식: 11 + {metrics['usage_years'] * 12} + {metrics['remaining_months']})",
             f"**{metrics['factor_depreciation_rate']}%** (제2항 감가율표 매칭 값)",
             f"{metrics['residual_rate'] * 100:.1f}% (연식 기준 참고용 고시)"
@@ -280,4 +292,4 @@ if st.button("📊 약관식 기준 최고 입찰가 산출", type="primary", us
             st.warning(f"• {p_name} ── {log_txt}")
 
     st.markdown("---")
-    st.info(f"💡 **최종 서머리 브리핑**: 본 차량은 행정안전부 고시 계수 식에 의해 산출된 최종 계수 **[{metrics['factor_score']}]** 값에 매핑되어, 제공해주신 감가율표 기준 **{metrics['factor_depreciation_rate']}%**의 감가율이 반영되었습니다. 이에 따라 계산된 최초 기준 가격은 **{round(metrics['base_evaluated_price'], 1):,}만 원**이며, 사고 및 상품화 비용을 역산한 최종 낙찰 마지노선은 **[{max_bid_price:,}만 원]** 입니다.")
+    st.info(f"💡 **최종 서머리 브리핑**: 본 차량은 {eval_year}년 {eval_month}월 기준 행정안전부 고시 계수 식에 의해 산출된 최종 계수 **[{metrics['factor_score']}]** 값에 매핑되어, 제공해주신 감가율표 기준 **{metrics['factor_depreciation_rate']}%**의 감가율이 반영되었습니다. 이에 따라 계산된 최초 기준 가격은 **{round(metrics['base_evaluated_price'], 1):,}만 원**이며, 사고 및 상품화 비용을 역산한 최종 낙찰 마지노선은 **[{max_bid_price:,}만 원]** 입니다.")
