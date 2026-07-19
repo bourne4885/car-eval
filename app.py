@@ -104,31 +104,92 @@ class OfficialMarketEvaluator:
             "prev_year_corrected_price": prev_year_corrected_price
         }
 
+    # 제13조 주행거리 평가 엔진
+    def calculate_mileage_adjustment(self, real_mileage, mileage_status, has_bc_rank, corrected_base_price, prev_year_corrected_price, residual_rate_percent):
+        # 1. 고장/조작 흔적 시 보정가격의 30% 감점 처리 및 일반 가감점 배제
+        if mileage_status == "고장 또는 조작 흔적 있음":
+            penalty = math.ceil(corrected_base_price * 0.3)
+            return -penalty, 0, "고장/조작으로 보정가격의 30% 일괄 감점 (소수점 이하 올림)"
+
+        # 2. 표준 주행거리 산출
+        # 사용월 수 = factor_score (총 경과개월 인덱스값 적용)
+        usage_months = 11 + ((self.current_year - self.reg_year) * 12) + (self.current_month - self.reg_month)
+        
+        if "화물" in self.car_type:
+            std_mileage = usage_months * 2.5 * 1000
+            denominator = 30
+        else: # 승용, 다목적형
+            std_mileage = usage_months * 1.66 * 1000
+            denominator = 20
+
+        # 3. 가·감점 기본 산식 연산
+        # 공식: ((전년도보정가격 - 보정가격) / 분모) * ((표준주행거리 - 실주행거리) / 1000) * (잔가율 / 100)
+        price_diff = prev_year_corrected_price - corrected_base_price
+        mileage_diff = std_mileage - real_mileage
+        
+        raw_adjustment = (price_diff / denominator) * (mileage_diff / 1000) * (residual_rate_percent / 100.0)
+        
+        # 4. 상한 및 하한 한도 규정 적용 (가점 15%, 감점 30% 한도 및 올림 처리)
+        max_gain_limit = math.ceil(corrected_base_price * 0.15)
+        max_loss_limit = math.ceil(corrected_base_price * 0.30)
+        
+        final_adjustment = 0
+        log_msg = ""
+        
+        if raw_adjustment > 0: # 실주행거리가 적어 가점이 발생하는 상황
+            if has_bc_rank:
+                final_adjustment = 0
+                log_msg = f"표준({int(std_mileage):,}km) 대비 적으나, 사고이력 B/C랭크 손상 보유로 가점 배제 (0만원)"
+            else:
+                calc_gain = math.ceil(raw_adjustment)
+                if calc_gain > max_gain_limit:
+                    final_adjustment = max_gain_limit
+                    log_msg = f"가점 한도(15%) 초과로 최대 한도 적용 (+{max_gain_limit}만원)"
+                else:
+                    final_adjustment = calc_gain
+                    log_msg = f"표준({int(std_mileage):,}km) 대비 적으므로 가점 적용 (+{final_adjustment}만원)"
+        else: # 실주행거리가 많아 감점이 발생하는 상황
+            calc_loss = math.ceil(abs(raw_adjustment)) # 올림 적용을 위해 절대값 후 올림
+            if calc_loss > max_loss_limit:
+                final_adjustment = -max_loss_limit
+                log_msg = f"감점 한도(30%) 초과로 최대 한도 적용 (-{max_loss_limit}만원)"
+            else:
+                final_adjustment = -calc_loss
+                log_msg = f"표준({int(std_mileage):,}km) 대비 많으므로 감점 적용 (-{calc_loss}만원)"
+                
+        return final_adjustment, std_mileage, log_msg
+
     def calculate_market_accident_penalty(self, selected_accident):
-        if not selected_accident: return 0, {}
+        if not selected_accident: return 0, {}, False
         market_price_table = {
             "국산": {"1랭크": 40, "2랭크": 100, "A랭크": 200, "B랭크": 350, "C랭크": 500},
-            "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭0": 600, "C랭크": 900}
+            "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
         }
         origin_key = "수입" if self.is_import else "국산"
         active_table = market_price_table[origin_key]
         total_penalty = 0
         detail_logs = {}
+        has_bc_rank = False
+        
         for part, data in selected_accident.items():
             rank = data["rank"]
             status = data["status"]
+            if rank in ["B랭크", "C랭크"]:
+                has_bc_rank = True
+                
             base_penalty = active_table.get(rank, 0)
             repair_factor = 1.0 if status == "교환(X)" else 0.6
             current_penalty = int(base_penalty * repair_factor)
             total_penalty += current_penalty
             detail_logs[part] = f"{status} ──> 실전 감가: -{current_penalty}만 원"
-        return total_penalty, detail_logs
+            
+        return total_penalty, detail_logs, has_bc_rank
 
 # ==========================================
 # 2. Streamlit 웹 UI 화면 구성
 # ==========================================
-st.title("🚗 약관 규격 기준 중고차 경매 매입 산출기")
-st.caption("제8조(사용년수), 제11조(기준가격 보정) 및 제12조(전년도 보정가격)를 완벽하게 통합 적용한 정밀 시스템입니다.")
+st.title("🚗 약관 규격 기준 중고차 매입 종합 산출기")
+st.caption("제8조(사용년수), 제11조·12조(보정식)와 더불어 제13조(주행거리 평가) 및 제14조(차대번호 표기)까지 완벽하게 통합 적용한 정밀 시스템입니다.")
 
 # 오늘 날짜를 기준으로 시스템 자동 계산 설정 제공
 today = datetime.today()
@@ -168,7 +229,17 @@ with col3:
     auction_fee_rate = st.slider("경매장 수수료율 (%)", min_value=0.0, max_value=5.0, value=2.2, step=0.1)
 
 st.markdown("---")
-st.header("🛠️ 2. 공식 사고 수리 이력 체크")
+st.header("📈 2. 제13조 & 제14조 상태 정보 입력 (주행거리 / 차대번호)")
+col_m1, col_m2, col_m3 = st.columns(3)
+with col_m1:
+    real_mileage = st.number_input("🚗 실 주행거리 입력 (km)", min_value=0, value=50000, step=1000)
+with col_m2:
+    mileage_status = st.selectbox("📊 주행거리 계기판 상태", ["정상 (작동중 및 교환 포함)", "고장 또는 조작 흔적 있음"])
+with col_m3:
+    vin_status = st.selectbox("🆔 제14조 차대번호 상태", ["정상", "부식, 훼손(오손), 도말 (불량)"])
+
+st.markdown("---")
+st.header("🛠️ 3. 공식 사고 수리 이력 체크")
 selected_accident = {}
 for section_title, parts in all_car_parts.items():
     st.markdown(f"##### {section_title}")
@@ -183,7 +254,7 @@ for section_title, parts in all_car_parts.items():
                     selected_accident[part_name] = {"rank": rank, "status": status}
 
 st.markdown("---")
-st.header("🎨 3. 현장 도색 필요 부위 (상품화 비용)")
+st.header("🎨 4. 현장 도색 필요 부위 (상품화 비용)")
 selected_paint_parts = []
 for section_title, parts in all_car_parts.items():
     if "골격" in section_title: continue
@@ -199,7 +270,7 @@ for section_title, parts in all_car_parts.items():
 
 st.markdown("---")
 
-# 연산 및 리포트 대시보드 출력 파트 (들여쓰기 및 문자열 포맷팅 오류 완전 해결)
+# 연산 및 리포트 대시보드 출력 파트
 if st.button("📊 약관 보정식 기준 최고 입찰가 산출", type="primary", use_container_width=True):
     is_imp = (origin == "수입")
     engine = OfficialMarketEvaluator(
@@ -208,43 +279,72 @@ if st.button("📊 약관 보정식 기준 최고 입찰가 산출", type="prima
         promotion_discount=promotion_discount
     )
     
+    # 1. 제11조 및 제12조 연산
     metrics = engine.calculate_official_metrics()
-    accident_penalty, logs = engine.calculate_market_accident_penalty(selected_accident)
+    
+    # 2. 사고 점검 및 B/C 랭크 보유 여부 확인
+    accident_penalty, logs, has_bc_rank = engine.calculate_market_accident_penalty(selected_accident)
+    
+    # 3. 제13조 주행거리 가감점 연산
+    mileage_adj, std_mileage, mileage_log = engine.calculate_mileage_adjustment(
+        real_mileage=real_mileage,
+        mileage_status=mileage_status,
+        has_bc_rank=has_bc_rank,
+        corrected_base_price=metrics["corrected_base_price"],
+        prev_year_corrected_price=metrics["prev_year_corrected_price"],
+        residual_rate_percent=metrics["factor_depreciation_rate"]
+    )
+    
+    # 4. 제14조 차대번호 불량 시 감점 점수 처리 (불량 시 20만 원 감점)
+    vin_penalty = 20 if vin_status == "부식, 훼손(오손), 도말 (불량)" else 0
+    
+    # 5. 기타 상품화 비용 (도색 비용)
     paint_penalty = len(selected_paint_parts) * paint_unit_cost
 
-    final_car_value = max(0, metrics["corrected_base_price"] - accident_penalty - paint_penalty)
+    # 6. 최종 차량 평가 가액 산출 (보정가격 + 주행거리 보정치 - 사고 감가 - 차대번호 감점 - 도색비용)
+    final_car_value = max(0, metrics["corrected_base_price"] + mileage_adj - accident_penalty - vin_penalty - paint_penalty)
+    
+    # 7. 경매장 수수료 및 딜러 마진을 차감한 최종 최고 입찰가 계산
     fee_factor = 1 + (auction_fee_rate / 100)
     max_bid_price = max(0, round((final_car_value - fixed_cost - target_margin) / fee_factor))
 
     # 🎯 산출 리포트 출력 파트
-    st.header(f"🎯 산출 리포트 (차량 경과 나이: {metrics['factor_score']}개월 차)")
+    st.header(f"🎯 종합 산출 리포트 (차량 경과 나이: {metrics['factor_score']}개월 차)")
     
     col_res1, col_res2, col_res3 = st.columns(3)
     with col_res1:
-        st.metric(label="📊 최종 보정가격 (제11조 적용 완료)", value=f"{round(metrics['corrected_base_price'], 1):,} 만원")
+        st.metric(label="📊 제11조 최종 보정가격", value=f"{round(metrics['corrected_base_price'], 1):,} 만원")
     with col_res2:
-        st.metric(label="📈 제12조 전년도 보정가격 (10% 가산)", value=f"{metrics['prev_year_corrected_price']:,} 만원")
+        st.metric(label="🚗 제13조 주행거리 가·감점 반영액", value=f"{mileage_adj:+,} 만원")
     with col_res3:
         st.metric(label="🏁 최종 최고 입찰가 (Max Bid)", value=f"{max_bid_price:,} 만원")
 
-    st.subheader("📋 제11조 약관 보정 및 감액 상세 내역")
+    # 세부 약관 내역 명세표 출력
+    st.subheader("📋 약관 조항별 정밀 산출 명세")
     metrics_data = {
-        "보정 항목 명세": [
-            "원시 기준가액 (보정 전)", 
-            "ⓐ 월별 보정액 차감 (나이 위치)", 
-            "ⓑ 특성값 보정액 차감 (프로모션)", 
-            "최종 보정 결과액"
+        "조항 및 평가 항목": [
+            "기본 원시 기준가액", 
+            "제11조 ⓐ 월별 보정액 차감", 
+            "제11조 ⓑ 특성값 보정액 차감", 
+            "제12조 전년도 보정가격",
+            "제13조 주행거리 평가 결과",
+            "제14조 차대번호 표기 평가"
         ],
-        "적용 값 및 산출 근거": [
+        "산출 결과 및 정밀 근거 명세": [
             f"{round(metrics['raw_base_price'], 1):,} 만원 (출고가 {base_price}만 × 잔가율 {metrics['factor_depreciation_rate']}%)",
-            f"-{round(metrics['month_correction_val'], 1):,} 만원 ({metrics['position_name']} ➡️ 기준가의 {metrics['month_loss_rate_percent']:.1f}% 감가)",
-            f"-{round(metrics['feature_correction_val'], 1):,} 만원 (구간 감액 {metrics['promo_cut']}만 × 잔가율)",
-            f"**{round(metrics['corrected_base_price'], 1):,} 만원** (감가 후 최종 차량 베이스 가격)"
+            f"-{round(metrics['month_correction_val'], 1):,} 만원 ({metrics['position_name']})",
+            f"-{round(metrics['feature_correction_val'], 1):,} 만원 (프로모션 구간 감액 {metrics['promo_cut']}만 × 잔가율)",
+            f"{metrics['prev_year_corrected_price']:,} 만원 (제11조 결과액의 10% 올림 가산)",
+            f"{mileage_adj:+,} 만원 ({mileage_log} / 표준 주행거리: {int(std_mileage):,}km)",
+            f"-{vin_penalty} 만원 (차대번호 상태: {vin_status})"
         ]
     }
     st.table(metrics_data)
 
-    if logs:
-        st.subheader("💥 선택된 사고 감가 내역")
-        for p_name, log_txt in logs.items():
-            st.warning(f"• {p_name} ── {log_txt}")
+    if logs or paint_penalty > 0:
+        st.subheader("💥 사고 감가 및 상품화 부대비용 명세")
+        if logs:
+            for p_name, log_txt in logs.items():
+                st.warning(f"• 사고수리이력 감점 [{p_name}] ── {log_txt}")
+        if paint_penalty > 0:
+            st.error(f"•🎨 현장 도색 상품화 비용: 총 {len(selected_paint_parts)}판 × {paint_unit_cost}만 = -{paint_penalty}만 원 차감")
