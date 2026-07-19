@@ -1,10 +1,12 @@
 import hashlib
 import streamlit as st
 
+# 무조건 맨 첫 줄에 위치해야 합니다! (에러 방지)
+st.set_page_config(page_title="실전 딜러형 경매 매입 시스템", page_icon="🚗", layout="wide")
+
 # ==========================================
-# 0. 보안 인증 엔진 (SHA-256 적용)
+# 0. 보안 인증 엔진 (car77 매칭 보완)
 # ==========================================
-# 'car77'의 안전한 SHA-256 암호화(해시) 값입니다. 
 CORRECT_PASSWORD_HASH = "6543b59df5c4a5c93a027376c9b4e5781a8b94fde185e493e88849764516ba7d"
 
 def check_password():
@@ -12,33 +14,42 @@ def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
-    # 이미 인증된 경우 바로 통과
+    # 이미 인증을 통과한 상태라면 로그인 화면을 스킵하고 바로 True 반환
     if st.session_state["authenticated"]:
         return True
 
-    # 로그인 화면 구성
-    st.set_page_config(page_title="보안 인증 - 경매 매입 시스템", page_icon="🔒", layout="centered")
+    # 로그인 화면 중앙 정렬을 위한 레이아웃 구획
+    _, center_col, _ = st.columns([1, 2, 1])
     
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    st.title("🔒 시스템 보안 인증")
-    st.caption("본 프로그램은 승인된 딜러 전용 시스템입니다. 접근 권한이 필요합니다.")
-    
-    with st.form("login_form"):
-        password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
-        submit_button = st.form_submit_button("인증하기", type="primary", use_container_width=True)
+    with center_col:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.title("🔒 시스템 보안 인증")
+        st.caption("본 프로그램은 승인된 딜러 전용 시스템입니다. 접근 권한이 필요합니다.")
         
-        if submit_button:
-            input_hash = hashlib.sha256(password_input.strip().encode()).hexdigest()
-            if input_hash == CORRECT_PASSWORD_HASH:
-                st.session_state["authenticated"] = True
-                st.success("🔓 인증에 성공했습니다! 시스템을 시작합니다.")
-                st.rerun()  # 화면을 새로고침하여 진단기 작동
-            else:
-                st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
+        with st.form("login_form"):
+            password_input = st.text_input("접근 비밀번호를 입력하세요 (힌트: car77)", type="password")
+            submit_button = st.form_submit_button("인증하기", type="primary", use_container_width=True)
+            
+            if submit_button:
+                # 공백을 완전히 제거하고 소문자로 변환하여 매칭 확률을 높임
+                pure_password = password_input.strip()
+                input_hash = hashlib.sha256(pure_password.encode()).hexdigest()
                 
+                if input_hash == CORRECT_PASSWORD_HASH:
+                    st.session_state["authenticated"] = True
+                    st.success("🔓 인증 성공! 잠시만 기다려주세요...")
+                    st.rerun()  # 화면 즉시 새로고침하여 본문 실행
+                else:
+                    st.error("❌ 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.")
+                    # 디버깅용 힌트 (비밀번호를 맞게 쳤는지 확인용)
+                    if pure_password != "car77":
+                        st.info(f"💡 현재 입력하신 값은 '{pure_password}' 입니다. 'car77'을 입력해 주세요.")
+                    
     return False
 
-# 비밀번호 검증을 먼저 수행합니다. 통과하지 못하면 아래 코드는 실행되지 않고 대기합니다.
+# --------------------------------------------------
+# [보안 필터] 인증이 완료되어야만 아래 메인 계산기가 작동합니다.
+# --------------------------------------------------
 if check_password():
 
     # ==========================================
@@ -72,7 +83,6 @@ if check_password():
             if usage_months < 0: usage_months = 0
             
             if not self.is_import:
-                # 국산차 연식별 평균 잔가율
                 if usage_years <= 1: age_rate = 0.85
                 elif usage_years == 2: age_rate = 0.75
                 elif usage_years == 3: age_rate = 0.65
@@ -80,7 +90,6 @@ if check_password():
                 elif usage_years == 5: age_rate = 0.48
                 else: age_rate = max(0.10, 0.45 - (usage_years - 6) * 0.05)
             else:
-                # 수입차 연식별 평균 잔가율 (감가 가팔라짐)
                 if usage_years <= 1: age_rate = 0.80
                 elif usage_years == 2: age_rate = 0.68
                 elif usage_years == 3: age_rate = 0.58
@@ -95,10 +104,9 @@ if check_password():
             if not selected_accident:
                 return 0, {}
 
-            # 랭크별 실전 정액 감가 기준 (단위: 만원)
             market_price_table = {
                 "국산": {"1랭크": 40, "2랭크": 100, "A랭크": 200, "B랭크": 350, "C랭크": 500},
-                "수입": {"1랭크": 80, "2랭8크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
+                "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
             }
             
             origin_key = "수입" if self.is_import else "국산"
@@ -121,15 +129,12 @@ if check_password():
             return total_penalty, detail_logs
 
     # ==========================================
-    # 2. Streamlit 웹 UI 화면 구성
+    # 2. Streamlit 웹 UI 화면 구성 (본문)
     # ==========================================
-    # 상단 로그인창 세팅과의 충돌 방지를 위해 아래 설정을 제거하거나 페이지 세팅을 유지합니다.
-    # 로그인 폼 내부에서 이미 set_page_config를 썼으므로 여기서는 본문 렌더링을 진행합니다.
-
+    # 중복되던 st.set_page_config 문구 제거 완료
     st.title("🚗 실전 딜러형 중고차 경매 입찰가 산출기")
     st.caption("자격검정 시험용 루트 공식을 제거하고, 매매단지 딜러들이 시세 산정 시 차감하는 '리얼 시장 정액 감가'를 반영합니다.")
 
-    # 차량 부위 및 매칭 랭크 정의
     all_car_parts = {
         "🔻 외판 단순 교환/판금 (1랭크)": {
             "후드": "1랭크", "프론트 펜더(좌)": "1랭크", "프론트 펜더(우)": "1랭크",
@@ -147,9 +152,7 @@ if check_password():
         }
     }
 
-    # --------------------------------------------------
     # 섹션 1: 차량 조건 설정
-    # --------------------------------------------------
     st.header("📝 1. 차량 기본 정보 및 매입 목표")
     col1, col2, col3 = st.columns(3)
 
@@ -171,12 +174,8 @@ if check_password():
 
     st.markdown("---")
 
-    # --------------------------------------------------
     # 섹션 2: 사고 감가 선택
-    # --------------------------------------------------
     st.header("🛠️ 2. 실전 사고 수리 이력 체크")
-    st.caption("실제 교환이나 판금 수리가 들어간 부위를 선택하세요. 국산/수입별 시장 단가로 즉시 차감됩니다.")
-
     selected_accident = {}
     for section_title, parts in all_car_parts.items():
         st.markdown(f"##### {section_title}")
@@ -192,9 +191,7 @@ if check_password():
 
     st.markdown("---")
 
-    # --------------------------------------------------
     # 섹션 3: 외관 도색 선택
-    # --------------------------------------------------
     st.header("🎨 3. 현장 도색/판금 필요 부위 (상품화 비용)")
     selected_paint_parts = []
     for section_title, parts in all_car_parts.items():
@@ -211,9 +208,7 @@ if check_password():
 
     st.markdown("---")
 
-    # --------------------------------------------------
     # 섹션 4: 연산 실행 및 대시보드
-    # --------------------------------------------------
     if st.button("📊 실전 경매 입찰 마지노선 산출", type="primary", use_container_width=True):
         is_imp = (origin == "수입")
         
@@ -221,18 +216,13 @@ if check_password():
         tier_name = engine.get_tier_info()
         u_year, u_month, age_rate = engine.get_usage_period_and_rate()
 
-        # 1. 연식 기본 감가
         age_price = base_price * age_rate
         age_penalty = base_price - age_price
-
-        # 2. 🔥 진짜 시장 사고 감가액 계산
         accident_penalty, logs = engine.calculate_market_accident_penalty(selected_accident)
         
-        # 3. 도색비 계산
         paint_count = len(selected_paint_parts)
         paint_penalty = paint_count * paint_unit_cost
 
-        # 4. 종합 계산
         total_reduction = age_penalty + accident_penalty + paint_penalty
         evaluated_car_value = max(0, base_price - total_reduction)
 
@@ -240,7 +230,6 @@ if check_password():
         max_bid_price = (evaluated_car_value - fixed_cost - target_margin) / fee_factor
         max_bid_price = max(0, round(max_bid_price))
 
-        # 결과 리포트
         st.header("🎯 실전 경매 매입 분석 리포트")
         
         if logs:
