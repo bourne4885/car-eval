@@ -25,7 +25,7 @@ def check_password():
         
         with st.form("login_form"):
             # 입력창 (car77 입력 시 대소문자나 공백 실수를 방지하도록 셋팅)
-            password_input = st.text_input("접근 비밀번호를 입력하세요 (비밀번호:car77)", type="password")
+            password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
             submit_button = st.form_submit_button("인증하기", type="primary", use_container_width=True)
             
             if submit_button:
@@ -38,7 +38,7 @@ def check_password():
                     st.success("🔓 인증 성공! 잠시만 기다려주세요...")
                     st.rerun()  # 화면 새로고침하여 본문 실행
                 else:
-                    st.error("❌ 비밀번호가 틀렸습니다. 영어 소문자로 'car77'을 정확히 입력했는지 확인해 주세요.")
+                    st.error("❌ 비밀번호가 틀렸습니다.")
                     if password_input:
                         st.info(f"💡 현재 입력창에 쓰신 글자: '{password_input}'")
                     
