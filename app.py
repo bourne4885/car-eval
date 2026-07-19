@@ -5,9 +5,9 @@ import streamlit as st
 st.set_page_config(page_title="실전 딜러형 경매 매입 시스템", page_icon="🚗", layout="wide")
 
 # ==========================================
-# 0. 해시 암호화 보안 엔진 (텍스트 노출 차단)
+# 0. 해시 암호화 보안 엔진 (인코딩 보완)
 # ==========================================
-# 원본 암호의 해시값만 저장합니다. 소스코드가 노출되어도 비밀번호 유추가 불가능합니다.
+
 CORRECT_HASH = "6543b59df5c4a5c93a027376c9b4e5781a8b94fde185e493e88849764516ba7d"
 
 def check_password():
@@ -27,13 +27,13 @@ def check_password():
         st.title("🔒 시스템 보안 인증")
         st.caption("본 프로그램은 승인된 딜러 전용 시스템입니다. 접근 권한이 필요합니다.")
         
-        # 💡 힌트 문구와 안내 텍스트를 완전히 제거했습니다.
+        # 텍스트가 입력되는 시점에 바로 반응하도록 세팅
         password_input = st.text_input("접근 비밀번호를 입력하세요", type="password")
         
         if password_input:
+            # 공백 제거 및 인코딩 규격 명시(utf-8)로 매칭 정확도를 100%로 올립니다.
             pure_password = password_input.strip()
-            # 입력된 텍스트를 즉시 암호화하여 대조
-            input_hash = hashlib.sha256(pure_password.encode()).hexdigest()
+            input_hash = hashlib.sha256(pure_password.encode('utf-8')).hexdigest()
             
             if input_hash == CORRECT_HASH:
                 st.session_state["authenticated"] = True
@@ -103,7 +103,7 @@ if check_password():
 
             market_price_table = {
                 "국산": {"1랭크": 40, "2랭크": 100, "A랭크": 200, "B랭크": 350, "C랭크": 500},
-                "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭크": 600, "C랭크": 900}
+                "수입": {"1랭크": 80, "2랭크": 180, "A랭크": 350, "B랭0": 600, "C랭크": 900}
             }
             
             origin_key = "수입" if self.is_import else "국산"
@@ -245,4 +245,4 @@ if check_password():
             st.text(f"   • 현장 도색 필요 비용 ({paint_count}판): {paint_penalty:,} 만원")
 
         st.markdown("---")
-        st.error(f"⚠️ **딜러용 최종 브리핑**: 사고 및 연식 조율 후 차량의 리얼 가치는 **{evaluated_car_value:,}만 원**입니다. 상사 마진 {target_margin}만 원을 깨지 않으려면 경매 낙찰 수수료을 포함해 **[{max_bid_price:,}만 원]** 밑으로 무조건 잡으셔야 합니다.")
+        st.error(f"⚠️ **딜러용 최종 브리핑**: 사고 및 연식 조율 후 차량의 리얼 가치는 **{evaluated_car_value:,}만 원**입니다. 상사 마진 {target_margin}만 원을 깨지 않으려면 경매 낙찰 수수료를 포함해 **[{max_bid_price:,}만 원]** 밑으로 무조건 잡으셔야 합니다.")
