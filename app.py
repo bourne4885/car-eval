@@ -35,7 +35,7 @@ class KautoStandardEvaluator:
         self.eval_year, self.eval_month = eval_year, eval_month
 
     def determine_grade(self):
-        if self.vehicle_type in ["승용형", "다목적형"]:
+        if self.vehicle_type in ["승용형", "다목적형", "전기/수소"]:
             cc = self.displacement
             if cc >= 3600: return "특C"
             elif cc >= 2900: return "특B"
@@ -67,8 +67,10 @@ class KautoStandardEvaluator:
         return total_months, RATE_TABLE.get(coeff, 12.65)
 
     def calculate_penalties(self, accident_data, painting_data, coeff, paint_cost):
-        market_price = {"국산": {"1랭크": 40, "2랭크": 100, "A랭크": 180, "B랭크": 300, "C랭크": 450},
-                        "수입": {"1랭크": 70, "2랭크": 150, "A랭크": 300, "B랭크": 550, "C랭크": 800}}
+        market_price = {
+            "국산": {"1랭크": 40, "2랭크": 100, "A랭크": 180, "B랭크": 300, "C랭크": 450},
+            "수입": {"1랭크": 70, "2랭크": 150, "A랭크": 300, "B랭크": 550, "C랭크": 800}
+        }
         active_table = market_price["수입" if self.is_import else "국산"]
         
         total_penalty = 0
@@ -76,7 +78,9 @@ class KautoStandardEvaluator:
         
         for part, data in accident_data.items():
             base = active_table.get(data["rank"], 0)
-            penalty = int(base * (1.0 if data["status"] == "교환(X)" else 0.6) * coeff)
+            # 교환(X)은 1.0배, 판금/용접(W)은 0.6배 적용
+            multiplier = 1.0 if data["status"] == "교환(X)" else 0.6
+            penalty = int(base * multiplier * coeff)
             total_penalty += penalty
             logs.append({"부위": part, "분류": "사고/교환", "상태": data["status"], "감가액": penalty})
             
@@ -123,7 +127,22 @@ all_parts = {
     "외판": ["후드", "프론트 펜더(좌)", "프론트 펜더(우)", "앞도어(좌)", "앞도어(우)", "뒷도어(좌)", "뒷도어(우)", "트렁크 리드", "쿼터 패널(좌)", "쿼터 패널(우)", "루프 패널"],
     "골격": ["프론트 패널", "리어 패널", "트렁크 플로어", "사이드 멤버(좌)", "사이드 멤버(우)", "휠 하우스(좌)", "휠 하우스(우)", "대쉬 패널"]
 }
-ranks = {part: "1랭크" if part in all_parts["외판"][:8] else ("2랭크" if part in all_parts["외판"][8:] else ("A랭크" if part in all_parts["골격"][:3] else ("B랭크" if part in all_parts["골격"][3:7] else "C랭크"))) for part in all_parts["외판"] + all_parts["골격"]}
+
+# 부위별 랭크 매핑 분리 (오류 방지)
+ranks = {}
+for p in all_parts["외판"]:
+    if p in ["후드", "프론트 펜더(좌)", "프론트 펜더(우)", "앞도어(좌)", "앞도어(우)", "뒷도어(좌)", "뒷도어(우)", "트렁크 리드"]:
+        ranks[p] = "1랭크"
+    else:
+        ranks[p] = "2랭크"
+
+for p in all_parts["골격"]:
+    if p in ["프론트 패널", "리어 패널", "트렁크 플로어"]:
+        ranks[p] = "A랭크"
+    elif p in ["사이드 멤버(좌)", "사이드 멤버(우)", "휠 하우스(좌)", "휠 하우스(우)"]:
+        ranks[p] = "B랭크"
+    else:
+        ranks[p] = "C랭크"
 
 st.divider()
 st.header("🛠️ 사고 및 교환 상태")
@@ -133,7 +152,8 @@ for category, parts in all_parts.items():
     cols = st.columns(4)
     for i, p in enumerate(parts):
         status = cols[i % 4].selectbox(p, ["정상", "교환(X)", "판금/용접(W)"], key=f"acc_{p}")
-        if status != "정상": accident_inputs[p] = {"rank": ranks[p], "status": status}
+        if status != "정상": 
+            accident_inputs[p] = {"rank": ranks[p], "status": status}
 
 st.divider()
 st.header("🎨 외판 도색 필요 부위")
@@ -158,13 +178,15 @@ if st.button("🚀 최종 매입가 산출하기", type="primary"):
 
     # 결과 표시
     col_r1, col_r2 = st.columns(2)
-    col_r1.metric("추정 매입가", f"{int(std_price):,} 만원")
-    col_r1.metric("최종 최고 입찰가", f"{int(max(0, final_bid)):,} 만원")
+    with col_r1:
+        st.metric("연식 반영 잔존 시세", f"{int(std_price):,} 만원")
+        st.metric("최종 최고 입찰가", f"{int(max(0, final_bid)):,} 만원")
 
     with col_r2:
         st.write("### 🧮 산출 상세 리포트")
         st.write(f"- **사용 월수**: {months}개월 ({reg_year}.{reg_month} → {eval_year}.{eval_month})")
         st.write(f"- **감가율 적용**: {rate}% (잔존가치)")
+        st.write(f"- **차량 등급**: {grade}등급 (계수: {coeff})")
         
         if len(painting_inputs) > 0:
             st.write(f"- **외판 도색**: 총 {len(painting_inputs)}개 (개당 {paint_cost}만원 적용)")
@@ -175,4 +197,4 @@ if st.button("🚀 최종 매입가 산출하기", type="primary"):
         else:
             st.write("감가 요인이 없습니다.")
             
-        st.info(f"산출식: (정상가 {int(std_price)}만원 - 감가합계 {total_penalty}만원 - 고정비 {fixed_cost}만원 - 마진 {margin}만원) / (1 + 수수료 {auction_fee}%)")
+        st.info(f"산출식: (잔존시세 {int(std_price)}만원 - 감가합계 {total_penalty}만원 - 고정비 {fixed_cost}만원 - 마진 {margin}만원) / (1 + 수수료 {auction_fee}%)")
