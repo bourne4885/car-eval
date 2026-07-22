@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 # ==========================================
-# 0. 전체 감가율 테이블 (1~180개월) - 사용년 계수 활용
+# 0. 전체 감가율 테이블 (1~180개월)
 # ==========================================
 RATE_TABLE = {
     1: 100, 2: 98.96, 3: 97.92, 4: 96.88, 5: 95.85, 6: 94.81, 7: 93.77, 8: 92.74, 9: 91.7, 10: 90.66,
@@ -26,7 +26,7 @@ RATE_TABLE = {
 }
 
 # ==========================================
-# 1. 승용형 감가 테이블 (이미지 기반 예시 데이터)
+# 1. 승용형 감가 테이블
 # ==========================================
 PASSENGER_TABLE = {
     "후드": {"특C": {"국산": 120, "수입": 240}, "특B": {"국산": 108, "수입": 216}, "특A": {"국산": 100, "수입": 200}, "I": {"국산": 80, "수입": 160}, "II": {"국산": 64, "수입": 128}, "III": {"국산": 52, "수입": 104}, "IV": {"국산": 45, "수입": 90}, "경": {"국산": 40, "수입": 80}},
@@ -85,14 +85,10 @@ class KautoStandardEvaluator:
         coeff = max(1, min(180, total_months))
         return total_months, RATE_TABLE.get(coeff, 12.65)
 
-    def calculate_penalties(self, accident_data, painting_data, grade, paint_cost):
+    def calculate_penalties(self, accident_data, painting_data, grade, paint_cost, adjustment_factor):
         origin_key = "수입" if self.is_import else "국산"
-        total_penalty = 0
+        total_raw_penalty = 0
         logs = []
-        
-        # 사용년 계수 (잔존율 값을 % 비율로 환산하여 적용: 예 88.59% -> 0.8859)
-        total_months, age_rate = self.get_age_depreciation_rate()
-        age_coefficient = age_rate / 100.0
         
         for part, data in accident_data.items():
             lookup_key = part
@@ -108,26 +104,31 @@ class KautoStandardEvaluator:
             grade_dict = part_dict.get(grade, {"국산": 50, "수입": 100})
             base_penalty = grade_dict.get(origin_key, 50)
             
-            # 공식 적용: 교환(X)은 1.0배, 판금/용접(W)은 0.6배 * [사용년 계수] 곱하기
             multiplier = 1.0 if data["status"] == "교환(X)" else 0.6
-            penalty = base_penalty * multiplier * age_coefficient
+            raw_val = base_penalty * multiplier
             
-            total_penalty += penalty
-            logs.append({"부위": part, "분류": "사고/교환", "상태": data["status"], "감가액(만원)": round(penalty, 2)})
+            # 단계별 계산을 위한 임시 기록
+            total_raw_penalty += raw_val
+            logs.append({"부위": part, "분류": "사고/교환", "상태": data["status"], "기본 감가액(만원)": raw_val})
             
         for part in painting_data:
-            # 도색비용에도 사용년 계수 반영 (또는 고정 적용 선택 가능)
-            p_cost = paint_cost * age_coefficient
-            total_penalty += p_cost
-            logs.append({"부위": part, "분류": "도색", "상태": "도색(P)", "감가액(만원)": round(p_cost, 2)})
+            total_raw_penalty += float(paint_cost)
+            logs.append({"부위": part, "분류": "도색", "상태": "도색(P)", "기본 감가액(만원)": float(paint_cost)})
             
-        return total_penalty, logs
+        # 보정계수 적용 최종 금액 계산
+        final_total_penalty = int(round(total_raw_penalty * adjustment_factor))
+        
+        # 로그에 보정계수가 반영된 최종 부위별 감가액(참고용 안분)도 추가
+        for log in logs:
+            log["보정 적용 감가액(만원)"] = round(log["기본 감가액(만원)"] * adjustment_factor, 1)
+
+        return final_total_penalty, total_raw_penalty, logs
 
 # ==========================================
 # UI 및 로직 구현
 # ==========================================
 st.set_page_config(page_title="차량 매입가 시스템", layout="wide")
-st.title("🚗 진단협회 표준 감가 산출 시스템 (제24조 연동)")
+st.title("🚗 진단협회 표준 감가 산출 시스템")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -145,7 +146,7 @@ with col1:
     else:
         displacement = st.number_input("배기량(cc)", value=2000, step=100)
         cargo_ton = 0.0
-    reg_year = st.number_input("등록년도", value=2022)
+    reg_year = st.number_input("등록년도", value=2019)
     reg_month = st.slider("등록월", 1, 12, 1)
 
 with col2:
@@ -155,6 +156,9 @@ with col2:
     fixed_cost = st.number_input("고정비(만원)", value=50, step=10)
     paint_cost = st.number_input("외판 도색 기본 건당 비용(만원)", value=10, step=1)
     auction_fee = st.slider("수수료율(%)", 0.0, 5.0, 2.2)
+    
+    st.subheader("⚙️ 감가 보정 설정")
+    adjustment_factor = st.slider("사고 감가 보정계수 (배수)", 1.0, 3.0, 1.5, 0.1, help="표준 감가액 대비 배수를 곱하여 감가 폭을 조절합니다.")
 
 all_parts = {
     "외판": ["후드", "프론트 펜더(좌)", "프론트 펜더(우)", "앞도어(좌)", "앞도어(우)", "뒷도어(좌)", "뒷도어(우)", "트렁크 리드", "쿼터 패널(좌)", "쿼터 패널(우)", "루프 패널"],
@@ -187,7 +191,7 @@ if st.button("🚀 최종 매입가 산출하기", type="primary"):
     grade = engine.determine_grade()
     months, rate = engine.get_age_depreciation_rate()
     
-    total_penalty, acc_logs = engine.calculate_penalties(accident_inputs, painting_inputs, grade, paint_cost)
+    total_penalty, raw_penalty, acc_logs = engine.calculate_penalties(accident_inputs, painting_inputs, grade, paint_cost, adjustment_factor)
     
     std_price = base_price * (rate / 100)
     final_bid = (std_price - total_penalty - fixed_cost - margin) / (1 + auction_fee/100)
@@ -199,16 +203,19 @@ if st.button("🚀 최종 매입가 산출하기", type="primary"):
         st.metric("최종 최고 입찰가", f"{int(max(0, final_bid)):,} 만원")
 
     with col_r2:
-        st.write("### 🧮 산출 상세 리포트")
+        st.write("### 🧮 산출 상세 리포트 (단계별 감가 과정)")
         st.write(f"- **경과 월수**: {months}개월 ({reg_year}.{reg_month} → {eval_year}.{eval_month})")
         st.write(f"- **사용년 계수(반영율)**: {rate}%")
         st.write(f"- **차량 등급**: {grade}등급")
-        st.write(f"- **총 감가액 합계**: {int(total_penalty):,} 만원")
         
-        st.write("### 📋 부위별 감가 내역 (규정 공식 적용)")
+        st.markdown("---")
+        st.write(f"#### 📌 단계별 산출 내역")
+        st.write(f"1. **부위별 기본 감가액 합계**: `{int(raw_penalty):,} 만원`")
+        st.write(f"2. **보정계수 적용**: `× {adjustment_factor}배`")
+        st.write(f"3. **🎯 최종 반영 총 감가액**: **`{int(total_penalty):,} 만원`**")
+        
+        st.write("### 📋 부위별 상세 내역")
         if acc_logs:
             st.table(pd.DataFrame(acc_logs))
         else:
             st.write("감가 요인이 없습니다.")
-            
-        st.info("💡 제24조 공식에 따라, 모든 부위별 감가/교환 금액에 '사용년 계수'가 비례하여 곱해지도록 설계되었습니다.")
